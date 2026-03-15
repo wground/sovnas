@@ -1,0 +1,13 @@
+[Unit]
+Description=sovnas host daemon for Urbit NAS
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/sovnas/sovnas-daemon.py --pier /media/data/docker/volumes/worryt-roshec/_data/worryt-roshec --root /home/nativeplanet/sovnas
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

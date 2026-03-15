@@ -7,7 +7,7 @@
 
 set -e
 
-PIER=/media/data/docker/volumes/worryt-roshec/_data/worryt-roshec
+PIER=/media/data/docker/volumes/worryt-roshec/_data/worryt-roshec #You need to change this to your own ship.
 DESK=$PIER/sovnas
 
 echo "=== SovNAS desk installer ==="

@@ -7,7 +7,20 @@
 
 set -e
 
-PIER=/media/data/docker/volumes/worryt-roshec/_data/worryt-roshec #You need to change this to your own ship.
+# ── Set your pier path here ──────────────────────────────────────────
+# For NativePlanet/Docker ships the pattern is usually:
+#   /media/data/docker/volumes/SHIP-NAME/_data/SHIP-NAME
+# Replace the example below with your own ship's pier path.
+PIER="${SOVNAS_PIER:-}"
+
+if [ -z "$PIER" ]; then
+  echo "ERROR: Set your pier path first. Either:"
+  echo "  export SOVNAS_PIER=/media/data/docker/volumes/YOUR-SHIP/_data/YOUR-SHIP"
+  echo "  bash /tmp/install-desk.sh"
+  echo ""
+  echo "Or edit PIER= at the top of this script."
+  exit 1
+fi
 DESK=$PIER/sovnas
 
 echo "=== SovNAS desk installer ==="

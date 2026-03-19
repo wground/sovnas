@@ -5,7 +5,8 @@ Wants=docker.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /opt/sovnas/sovnas-daemon.py --pier /media/data/docker/volumes/worryt-roshec/_data/worryt-roshec --root /home/nativeplanet/sovnas
+# Replace YOUR-SHIP below with your ship name (e.g. sampel-palnet)
+ExecStart=/usr/bin/python3 /opt/sovnas/sovnas-daemon.py --pier /media/data/docker/volumes/YOUR-SHIP/_data/YOUR-SHIP --root /home/nativeplanet/sovnas
 Restart=always
 RestartSec=5
 

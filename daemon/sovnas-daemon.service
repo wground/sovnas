@@ -5,8 +5,8 @@ Wants=docker.service
 
 [Service]
 Type=simple
-# Replace YOUR-SHIP below with your ship name (e.g. sampel-palnet)
-ExecStart=/usr/bin/python3 /opt/sovnas/sovnas-daemon.py --pier /media/data/docker/volumes/YOUR-SHIP/_data/YOUR-SHIP --root /home/nativeplanet/sovnas
+# Copy sovnas.config.template.json to /opt/sovnas/sovnas.config.json and edit it
+ExecStart=/usr/bin/python3 /opt/sovnas/sovnas-daemon.py --config /opt/sovnas/sovnas.config.json
 Restart=always
 RestartSec=5
 

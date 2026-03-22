@@ -129,7 +129,7 @@ export default function App() {
 
   const handleDownload = (path: string) => {
     // Download directly from daemon's HTTP server (avoids Chromium insecure-context blocks)
-    const dlPort = 8090;
+    const dlPort = 8090; // TODO: read from agent config instead of hardcoding (must match daemon.download_server_port in sovnas.config.json)
     const host = window.location.hostname;
     const cleanPath = path.replace(/^\//, '');
     const encoded = cleanPath.split('/').map(encodeURIComponent).join('/');

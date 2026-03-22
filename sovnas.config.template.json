@@ -1,0 +1,16 @@
+{
+  "ship": {
+    "name": "YOUR-SHIP",
+    "pier": "/media/data/docker/volumes/YOUR-SHIP/_data/YOUR-SHIP"
+  },
+  "daemon": {
+    "storage_root": "/home/nativeplanet/sovnas",
+    "max_upload_bytes": 524288000,
+    "log_level": "INFO",
+    "download_server_port": 8090,
+    "install_dir": "/opt/sovnas"
+  },
+  "network": {
+    "peers": []
+  }
+}

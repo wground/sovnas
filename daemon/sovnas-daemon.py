@@ -408,35 +408,83 @@ def start_download_server(storage_root: str, port: int) -> None:
 # Entry point
 # ---------------------------------------------------------------------------
 
+def load_config(config_path: str) -> dict:
+    """Load and return the sovnas JSON config file."""
+    with open(config_path, 'r') as f:
+        return json.load(f)
+
+
+def find_config() -> 'dict | None':
+    """Search for sovnas.config.json in standard locations."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.join(script_dir, '..', 'sovnas.config.json'),  # repo layout
+        os.path.join(script_dir, 'sovnas.config.json'),         # installed alongside daemon
+        '/opt/sovnas/sovnas.config.json',                       # standard install location
+    ]
+    for path in candidates:
+        real = os.path.realpath(path)
+        if os.path.isfile(real):
+            logger.info('Found config at %s', real)
+            return load_config(real)
+    return None
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description='sovnas-daemon: host filesystem daemon for %sovnas Urbit NAS',
     )
-    parser.add_argument('--pier', required=True,
-                        help='Path to Urbit pier directory (finds .urb/dev/sovnas socket)')
-    parser.add_argument('--root', default='/home/nativeplanet/sovnas',
-                        help='Storage root directory (default: /home/nativeplanet/sovnas)')
-    parser.add_argument('--max-size', type=int, default=524_288_000,
-                        help='Max upload size in bytes (default: 524288000 = 500MB)')
-    parser.add_argument('--log-level', default='INFO',
+    parser.add_argument('--config',
+                        help='Path to sovnas.config.json')
+    parser.add_argument('--pier',
+                        help='Path to Urbit pier directory (overrides config file)')
+    parser.add_argument('--root',
+                        help='Storage root directory (overrides config file)')
+    parser.add_argument('--max-size', type=int,
+                        help='Max upload size in bytes (overrides config file)')
+    parser.add_argument('--log-level',
                         choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
-                        help='Logging verbosity (default: INFO)')
-    parser.add_argument('--dl-port', type=int, default=8090,
-                        help='Port for direct file download HTTP server (default: 8090)')
+                        help='Logging verbosity (overrides config file)')
+    parser.add_argument('--dl-port', type=int,
+                        help='Port for direct file download HTTP server (overrides config file)')
     args = parser.parse_args()
 
-    logging.getLogger().setLevel(getattr(logging, args.log_level))
+    # Load config: explicit --config path > auto-discovery > empty
+    cfg = {}
+    if args.config:
+        cfg = load_config(args.config)
+    else:
+        cfg = find_config() or {}
+
+    # Resolve values: CLI args override config, with sensible defaults
+    ship_cfg = cfg.get('ship', {})
+    daemon_cfg = cfg.get('daemon', {})
+
+    pier = args.pier or ship_cfg.get('pier')
+    storage_root = args.root or daemon_cfg.get('storage_root', '/home/nativeplanet/sovnas')
+    max_size = args.max_size or daemon_cfg.get('max_upload_bytes', 524_288_000)
+    log_level = args.log_level or daemon_cfg.get('log_level', 'INFO')
+    dl_port = args.dl_port or daemon_cfg.get('download_server_port', 8090)
+
+    if not pier:
+        print('ERROR: No pier path configured. Either:', file=sys.stderr)
+        print('  1. Create sovnas.config.json (copy from sovnas.config.template.json)', file=sys.stderr)
+        print('  2. Pass --config /path/to/sovnas.config.json', file=sys.stderr)
+        print('  3. Pass --pier /path/to/pier directly', file=sys.stderr)
+        sys.exit(1)
+
+    logging.getLogger().setLevel(getattr(logging, log_level))
 
     # Start download HTTP server in background thread
     dl_thread = threading.Thread(
         target=start_download_server,
-        args=(args.root, args.dl_port),
+        args=(storage_root, dl_port),
         daemon=True,
     )
     dl_thread.start()
 
-    socket_path = os.path.join(args.pier, '.urb', 'dev', 'sovnas', 'sovnas')
-    run_daemon(socket_path, args.root, args.max_size)
+    socket_path = os.path.join(pier, '.urb', 'dev', 'sovnas', 'sovnas')
+    run_daemon(socket_path, storage_root, max_size)
 
 
 if __name__ == '__main__':

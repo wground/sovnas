@@ -7,18 +7,28 @@
 
 set -e
 
-# ── Set your pier path here ──────────────────────────────────────────
-# For NativePlanet/Docker ships the pattern is usually:
-#   /media/data/docker/volumes/SHIP-NAME/_data/SHIP-NAME
-# Replace the example below with your own ship's pier path.
+# ── Resolve pier path ────────────────────────────────────────────────
+# Priority: SOVNAS_PIER env var > sovnas.config.json > error
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PIER="${SOVNAS_PIER:-}"
 
 if [ -z "$PIER" ]; then
-  echo "ERROR: Set your pier path first. Either:"
-  echo "  export SOVNAS_PIER=/media/data/docker/volumes/YOUR-SHIP/_data/YOUR-SHIP"
-  echo "  bash /tmp/install-desk.sh"
-  echo ""
-  echo "Or edit PIER= at the top of this script."
+  # Try to read from config file
+  for cfg in "$SCRIPT_DIR/sovnas.config.json" /opt/sovnas/sovnas.config.json; do
+    if [ -f "$cfg" ]; then
+      PIER="$(python3 -c "import json; print(json.load(open('$cfg'))['ship']['pier'])" 2>/dev/null)"
+      if [ -n "$PIER" ]; then
+        echo "Using pier from $cfg"
+        break
+      fi
+    fi
+  done
+fi
+
+if [ -z "$PIER" ]; then
+  echo "ERROR: No pier path found. Either:"
+  echo "  1. Create sovnas.config.json (copy from sovnas.config.template.json)"
+  echo "  2. export SOVNAS_PIER=/media/data/docker/volumes/YOUR-SHIP/_data/YOUR-SHIP"
   exit 1
 fi
 DESK=$PIER/sovnas

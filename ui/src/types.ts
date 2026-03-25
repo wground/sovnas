@@ -13,6 +13,18 @@ export interface Config {
   connected: boolean;
 }
 
+export interface DaemonConfig {
+  ship: { name: string; pier: string };
+  daemon: {
+    storage_root: string;
+    max_upload_bytes: number;
+    log_level: string;
+    download_server_port: number;
+    install_dir: string;
+  };
+  network: { peers: any[] };
+}
+
 export type SortField = 'name' | 'size' | 'modified';
 export type SortDir = 'asc' | 'desc';
 export type ViewMode = 'list' | 'grid';

@@ -95,6 +95,20 @@
     =/  upd=update:sovnas  [%config-update config.act]
     :_  state(config config.act)
     [%give %fact ~[/updates /config] %sovnas-update !>(upd)]~
+  ::
+      %read-daemon-config
+    =/  id  nonce.state
+    =/  cmd  [%config-read ~]
+    =/  cord  (ipc-command-to-json-cord:snv id cmd)
+    :_  state(pending (~(put by pending.state) id act), nonce +(nonce.state))
+    [%pass /lick/[(scot %ud id)] %arvo %l %spit /sovnas %txt cord]~
+  ::
+      %write-daemon-config
+    =/  id  nonce.state
+    =/  cmd  [%config-write cfg-json.act]
+    =/  cord  (ipc-command-to-json-cord:snv id cmd)
+    :_  state(pending (~(put by pending.state) id act), nonce +(nonce.state))
+    [%pass /lick/[(scot %ud id)] %arvo %l %spit /sovnas %txt cord]~
   ==
 ::
 ++  handle-lick
@@ -151,6 +165,11 @@
       ::  data is base64 cord; frontend decodes it
       =/  upd=update:sovnas
         [%file-data pth data.resp mime.resp size.resp]
+      :_  new-state
+      [%give %fact ~[/updates] %sovnas-update !>(upd)]~
+    ::
+        %config-data
+      =/  upd=update:sovnas  [%daemon-config cfg-json.resp]
       :_  new-state
       [%give %fact ~[/updates] %sovnas-update !>(upd)]~
     ::

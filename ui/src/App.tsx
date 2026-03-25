@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { subscribe, listDir, downloadFile, deleteFile, renameFile, mkdir, UpdateEvent } from './api';
-import { FileEntry, Config, SortField, SortDir, ViewMode, UploadProgress } from './types';
+import { FileEntry, Config, DaemonConfig, SortField, SortDir, ViewMode, UploadProgress } from './types';
 import FileBrowser from './components/FileBrowser';
 import Toolbar from './components/Toolbar';
 import UploadZone from './components/UploadZone';
@@ -21,6 +21,7 @@ export default function App() {
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [uploads, setUploads] = useState<UploadProgress[]>([]);
+  const [daemonConfig, setDaemonConfig] = useState<DaemonConfig | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
@@ -56,8 +57,19 @@ export default function App() {
           setLoading(false);
         }
       } else if (evt.type === 'file-data') {
-        // file-data events are no longer used for downloads (we use direct HTTP)
-        // kept for backwards compatibility
+        // Trigger browser download via blob (works on HTTPS / secure contexts)
+        const binary = atob(evt.data);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        const blob = new Blob([bytes], { type: evt.mime || 'application/octet-stream' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = evt.path.split('/').pop() ?? 'download';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
       } else if (evt.type === 'op-result') {
         showToast(evt.msg || (evt.success ? 'Done' : 'Error'), evt.success);
         if (evt.success) listDir(currentPath).catch(() => {});
@@ -66,6 +78,8 @@ export default function App() {
       } else if (evt.type === 'daemon-status') {
         setConfig((c) => ({ ...c, connected: evt.connected }));
         if (!evt.connected) showToast('Daemon disconnected', false);
+      } else if (evt.type === 'daemon-config') {
+        setDaemonConfig(evt.config);
       }
     };
 
@@ -127,13 +141,23 @@ export default function App() {
     }
   };
 
-  const handleDownload = (path: string) => {
-    // Download directly from daemon's HTTP server (avoids Chromium insecure-context blocks)
-    const dlPort = 8090; // TODO: read from agent config instead of hardcoding (must match daemon.download_server_port in sovnas.config.json)
-    const host = window.location.hostname;
-    const cleanPath = path.replace(/^\//, '');
-    const encoded = cleanPath.split('/').map(encodeURIComponent).join('/');
-    window.open(`http://${host}:${dlPort}/${encoded}`, '_blank');
+  const handleDownload = async (path: string) => {
+    if (window.location.protocol === 'https:') {
+      // Over HTTPS (e.g. StarTram): use Urbit channel — secure context allows blob downloads
+      try {
+        await downloadFile(path);
+        // file-data event handler below will trigger the actual browser download
+      } catch {
+        showToast('Download failed', false);
+      }
+    } else {
+      // Over HTTP (e.g. local NativePlanet): use daemon's HTTP server to bypass Chromium blocks
+      const dlPort = 8090; // must match daemon.download_server_port in sovnas.config.json
+      const host = window.location.hostname;
+      const cleanPath = path.replace(/^\//, '');
+      const encoded = cleanPath.split('/').map(encodeURIComponent).join('/');
+      window.open(`http://${host}:${dlPort}/${encoded}`, '_blank');
+    }
   };
 
   return (
@@ -155,7 +179,7 @@ export default function App() {
       </header>
 
       {showSettings && (
-        <SettingsPanel config={config} onClose={() => setShowSettings(false)} />
+        <SettingsPanel config={config} daemonConfig={daemonConfig} onClose={() => setShowSettings(false)} />
       )}
 
       <div className="max-w-6xl mx-auto px-4 py-4">

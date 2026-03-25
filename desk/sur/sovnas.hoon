@@ -33,6 +33,8 @@
       [%rename src=path dst=path]
       [%mkdir =path]
       [%set-config =config]
+      [%read-daemon-config ~]
+      [%write-daemon-config cfg-json=@t]
   ==
 ::
 ::  -- Updates (agent -> frontend) --
@@ -43,6 +45,7 @@
       [%op-result tag=@t success=? msg=@t]
       [%config-update =config]
       [%daemon-status connected=?]
+      [%daemon-config cfg-json=@t]
   ==
 ::
 ::  -- IPC Commands (agent -> daemon via %lick) --
@@ -55,6 +58,8 @@
       [%mv src=@t dst=@t]
       [%mk dir=@t]
       [%stat path=@t]
+      [%config-read ~]
+      [%config-write cfg-json=@t]
   ==
 ::
 ::  -- IPC Responses (daemon -> agent via %lick) --
@@ -62,6 +67,7 @@
 +$  ipc-response
   $%  [%ls-result dir=@t entries=(list ipc-file-info)]
       [%get-result path=@t data=@t mime=@t size=@ud]
+      [%config-data cfg-json=@t]
       [%ok tag=@t msg=@t]
       [%err tag=@t msg=@t]
   ==

@@ -185,6 +185,43 @@ def op_stat(storage_root: str, path: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Config file operations
+# ---------------------------------------------------------------------------
+
+_config_path: 'str | None' = None  # set in main()
+
+
+def op_config_read() -> dict:
+    if not _config_path or not os.path.isfile(_config_path):
+        raise FileNotFoundError('No config file found')
+    with open(_config_path, 'r') as f:
+        return json.load(f)
+
+
+def op_config_write(new_cfg: dict) -> dict:
+    if not _config_path:
+        raise FileNotFoundError('No config file path configured')
+    # Read existing, merge updates, write back
+    cfg = {}
+    if os.path.isfile(_config_path):
+        with open(_config_path, 'r') as f:
+            cfg = json.load(f)
+    # Merge ship section
+    if 'ship' in new_cfg:
+        cfg.setdefault('ship', {}).update(new_cfg['ship'])
+    # Merge daemon section
+    if 'daemon' in new_cfg:
+        cfg.setdefault('daemon', {}).update(new_cfg['daemon'])
+    # Merge network section
+    if 'network' in new_cfg:
+        cfg.setdefault('network', {}).update(new_cfg['network'])
+    with open(_config_path, 'w') as f:
+        json.dump(cfg, f, indent=2)
+        f.write('\n')
+    return cfg
+
+
+# ---------------------------------------------------------------------------
 # Command dispatcher
 # ---------------------------------------------------------------------------
 
@@ -209,6 +246,10 @@ def dispatch(cmd: dict, storage_root: str, max_size: int) -> dict:
             data = op_mk(storage_root, args.get('dir', '/'))
         elif command == 'stat':
             data = op_stat(storage_root, args.get('path', '/'))
+        elif command == 'config-read':
+            data = op_config_read()
+        elif command == 'config-write':
+            data = op_config_write(args)
         else:
             return {'id': req_id, 'status': 'error', 'error': f'Unknown command: {command!r}'}
 
@@ -450,11 +491,25 @@ def main() -> None:
     args = parser.parse_args()
 
     # Load config: explicit --config path > auto-discovery > empty
+    global _config_path
     cfg = {}
     if args.config:
-        cfg = load_config(args.config)
+        _config_path = os.path.realpath(args.config)
+        cfg = load_config(_config_path)
     else:
-        cfg = find_config() or {}
+        # Try to find config and remember its path
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        candidates = [
+            os.path.join(script_dir, '..', 'sovnas.config.json'),
+            os.path.join(script_dir, 'sovnas.config.json'),
+            '/opt/sovnas/sovnas.config.json',
+        ]
+        for path in candidates:
+            real = os.path.realpath(path)
+            if os.path.isfile(real):
+                _config_path = real
+                cfg = load_config(real)
+                break
 
     # Resolve values: CLI args override config, with sensible defaults
     ship_cfg = cfg.get('ship', {})

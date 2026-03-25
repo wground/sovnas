@@ -104,6 +104,8 @@
       %-  pairs:enjs
       :~  ['daemon-status' (frond:enjs 'connected' b+connected.u)]
       ==
+    %daemon-config
+      (frond:enjs 'daemon-config' s+cfg-json.u)
   ==
 ::
 ++  config-to-json
@@ -208,6 +210,14 @@
     ?>  ?=(%n -.ms)
     [%set-config (cord-to-path p.rt) (parse-json-num p.ms) %.n]
   ::
+  ?:  (~(has by m) 'read-daemon-config')
+    [%read-daemon-config ~]
+  ::
+  ?:  (~(has by m) 'write-daemon-config')
+    =/  inner=json  (~(got by m) 'write-daemon-config')
+    ?>  ?=(%s -.inner)
+    [%write-daemon-config p.inner]
+  ::
   !!
 ::
 ::  +ipc-command-to-json-cord: serialize IPC command as JSON cord
@@ -217,13 +227,15 @@
   ^-  @t
   =/  cmd-name=@t
     ?-  -.cmd
-      %ls    'ls'
-      %put   'put'
-      %get   'get'
-      %rm    'rm'
-      %mv    'mv'
-      %mk    'mk'
-      %stat  'stat'
+      %ls            'ls'
+      %put           'put'
+      %get           'get'
+      %rm            'rm'
+      %mv            'mv'
+      %mk            'mk'
+      %stat          'stat'
+      %config-read   'config-read'
+      %config-write  'config-write'
     ==
   =/  args=json
     ?-  -.cmd
@@ -243,6 +255,8 @@
         ==
       %mk    (frond:enjs 'dir' s+dir.cmd)
       %stat  (frond:enjs 'path' s+path.cmd)
+      %config-read   o+~
+      %config-write  (frond:enjs 'config' s+cfg-json.cmd)
     ==
   %-  en:json:html
   %-  pairs:enjs
@@ -299,6 +313,10 @@
           ?:(?=(%n -.mod-j) (parse-json-num p.mod-j) 0)
           ?:(?=(%b -.dir-j) p.dir-j %.n)
     [id %ls-result dir-cord entries]
+  ::
+  ?:  (~(has by dm) 'ship')
+    ::  config-read or config-write response — re-serialize to JSON cord
+    [id %config-data (en:json:html data-j)]
   ::
   ?:  (~(has by dm) 'data')
     =/  path-j=json  (~(gut by dm) 'path' s+'/')

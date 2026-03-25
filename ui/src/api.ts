@@ -1,5 +1,5 @@
 import Urbit from '@urbit/http-api';
-import { FileEntry, Config } from './types';
+import { FileEntry, Config, DaemonConfig } from './types';
 
 let api: Urbit | null = null;
 
@@ -21,7 +21,8 @@ export type UpdateEvent =
   | { type: 'file-data'; path: string; data: string; mime: string; size: number }
   | { type: 'op-result'; tag: string; success: boolean; msg: string }
   | { type: 'config-update'; config: Config }
-  | { type: 'daemon-status'; connected: boolean };
+  | { type: 'daemon-status'; connected: boolean }
+  | { type: 'daemon-config'; config: DaemonConfig };
 
 function parseUpdate(raw: any): UpdateEvent | null {
   if (raw['dir-list']) {
@@ -56,6 +57,14 @@ function parseUpdate(raw: any): UpdateEvent | null {
   }
   if (raw['daemon-status']) {
     return { type: 'daemon-status', connected: raw['daemon-status'].connected };
+  }
+  if (raw['daemon-config']) {
+    try {
+      const cfg = JSON.parse(raw['daemon-config']);
+      return { type: 'daemon-config', config: cfg };
+    } catch {
+      return null;
+    }
   }
   return null;
 }
@@ -130,6 +139,22 @@ export async function mkdir(path: string): Promise<void> {
     app: 'sovnas',
     mark: 'sovnas-action',
     json: { mkdir: { path } },
+  });
+}
+
+export async function readDaemonConfig(): Promise<void> {
+  await getApi().poke({
+    app: 'sovnas',
+    mark: 'sovnas-action',
+    json: { 'read-daemon-config': null },
+  });
+}
+
+export async function writeDaemonConfig(cfg: DaemonConfig): Promise<void> {
+  await getApi().poke({
+    app: 'sovnas',
+    mark: 'sovnas-action',
+    json: { 'write-daemon-config': JSON.stringify(cfg) },
   });
 }
 

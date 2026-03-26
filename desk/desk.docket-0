@@ -1,0 +1,10 @@
+:~
+  title+'SovNAS'
+  info+'Sovereign file storage for your Urbit ship'
+  color+0xb3.1b1b
+  base+'sovnas'
+  site+/apps/sovnas
+  version+[0 1 0]
+  website+''
+  license+'MIT'
+==

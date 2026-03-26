@@ -4,9 +4,26 @@ Sovereign NAS for Urbit. A self-hosted file manager that runs as an Urbit app, g
 
 ## Architecture
 
-- **Hoon desk** (`desk/`) -- Gall agent (`%sovnas`) that handles frontend subscriptions and communicates with the host daemon via the `%lick` IPC vane. Includes a static fileserver (`%sovnas-fileserver`) to serve the UI from Clay.
-- **Python daemon** (`daemon/`) -- Runs on the host machine, connects to the `%lick` Unix domain socket, and executes sandboxed filesystem operations (ls, get, put, rm, mv, mk) within a configurable storage root.
-- **React frontend** (`ui/`) -- Single-page app served by the Hoon fileserver. Communicates with the Gall agent via `@urbit/http-api` (pokes + SSE subscriptions).
+```
+Frontend (React)  <-->  Gall Agent (%sovnas)  <-->  Python Daemon  <-->  Host Filesystem
+     (Eyre HTTP)             (%lick IPC)            (Unix socket)
+```
+
+- **Hoon desk** (`desk/`) -- Gall agent that handles frontend subscriptions and communicates with the host daemon via the `%lick` IPC vane. Includes a static fileserver to serve the compiled React UI from Clay. Ships with a Landscape tile via `desk.docket-0`.
+- **Python daemon** (`daemon/`) -- Runs on the host machine, connects to the `%lick` Unix domain socket, and executes sandboxed filesystem operations within a configurable storage root. Also runs an HTTP file server for direct downloads.
+- **React frontend** (`ui/`) -- Single-page app built with React 18, TypeScript, and Tailwind CSS. Communicates with the Gall agent via `@urbit/http-api` (pokes + SSE subscriptions).
+
+## Features
+
+- Browse directories with breadcrumb navigation
+- Upload files (chunked for files >4MB, configurable size limit)
+- Download files (direct HTTP or blob-based for HTTPS/StarTram access)
+- Create, rename, and delete files and directories
+- List and grid view modes
+- Right-click context menus
+- Settings panel to view and edit daemon configuration from the UI
+- Landscape home screen tile
+- Path traversal protection and sandboxed filesystem access
 
 ## Deployment
 
@@ -16,12 +33,34 @@ Sovereign NAS for Urbit. A self-hosted file manager that runs as an Urbit app, g
 - Python 3.8+ on the host
 - Node.js 18+ (for building the UI)
 
-### Install the desk
+### 1. Configure
 
-1. Copy `desk/` contents into your ship's `%sovnas` desk
-2. In dojo: `|commit %sovnas`
+Copy the config template and fill in your ship's details:
 
-### Build the UI
+```bash
+cp sovnas.config.template.json sovnas.config.json
+```
+
+Edit `sovnas.config.json`:
+
+```json
+{
+  "ship": {
+    "name": "your-ship",
+    "pier": "/media/data/docker/volumes/your-ship/_data/your-ship"
+  },
+  "daemon": {
+    "storage_root": "/home/nativeplanet/sovnas",
+    "max_upload_bytes": 524288000,
+    "log_level": "INFO",
+    "download_server_port": 8090,
+    "install_dir": "/opt/sovnas"
+  },
+  "network": { "peers": [] }
+}
+```
+
+### 2. Build the UI
 
 ```bash
 cd ui
@@ -29,28 +68,66 @@ npm install
 npm run build
 ```
 
-Copy `dist/` contents into `desk/web/` and `|commit %sovnas` again.
+The build output in `dist/` is automatically referenced by `desk/web/`.
 
-### Run the daemon
+### 3. Install the desk
+
+Copy `desk/` contents into your ship's `%sovnas` desk, or use the install script:
 
 ```bash
-python3 daemon/sovnas-daemon.py \
-  --pier /path/to/your/pier \
-  --root /path/to/storage/directory
+bash install-desk.sh
 ```
 
-The daemon also starts an HTTP file server on port 8090 for direct downloads. To run as a systemd service, see `daemon/sovnas-daemon.service` for a template.
+Then in dojo:
 
-### Access the UI
+```
+|commit %sovnas
+|install our %sovnas
+```
 
-Navigate to `http://<your-ship>:8080/apps/sovnas/` (adjust port for your Eyre configuration).
+**Note:** The Landscape tile requires `lib/docket.hoon`, `sur/docket.hoon`, and `mar/docket-0.hoon` from your ship's `%landscape` desk. Copy them into the sovnas desk if they aren't already present.
+
+### 4. Install and run the daemon
+
+```bash
+cd daemon
+bash install.sh
+sudo systemctl start sovnas-daemon
+sudo systemctl enable sovnas-daemon
+```
+
+Or run manually:
+
+```bash
+python3 daemon/sovnas-daemon.py --config /path/to/sovnas.config.json
+```
+
+### 5. Access the UI
+
+Navigate to `http://<your-ship>:8080/apps/sovnas/` (adjust port for your Eyre configuration). The app also appears as a tile on your Landscape home screen.
+
+For remote access via StarTram, use your StarTram URL (e.g. `https://your-ship.startram.io/apps/sovnas/`). Downloads automatically use a blob-based method over HTTPS.
+
+## Configuration
+
+All deployment-specific settings live in `sovnas.config.json` (gitignored). A template is provided at `sovnas.config.template.json`.
+
+You can also edit configuration from the Settings panel within the SovNAS UI.
+
+| Setting | Description |
+|---------|-------------|
+| `ship.name` | Your ship name (without `~`) |
+| `ship.pier` | Absolute path to your ship's pier |
+| `daemon.storage_root` | Root directory for file storage |
+| `daemon.max_upload_bytes` | Max upload size in bytes (default 500MB) |
+| `daemon.log_level` | Logging level: DEBUG, INFO, WARNING, ERROR |
+| `daemon.download_server_port` | HTTP download server port (default 8090) |
 
 ## Known Limitations
 
-- **Chromium download restrictions**: Chromium-based browsers (Chrome, Arc, Edge, Brave) block or mark as "unconfirmed" file downloads from HTTP origins. To fix this, navigate to `chrome://flags/#unsafely-treat-insecure-origin-as-secure`, add your ship's HTTP origins (e.g. `http://nativeplanet.local:8081,http://nativeplanet.local:8090`), enable the flag, and relaunch. Firefox does not have this issue.
-- **Upload size limit**: Uploads are capped at 2MB per file to avoid out-of-memory crashes in Hoon's base64 handling. Chunked upload support exists but the reassembly is memory-intensive.
-- **No authentication on download server**: The daemon's HTTP download server (port 8090) serves files without authentication. It is intended for use on trusted local networks only.
-- **No HTTPS**: The app runs over HTTP. If your ship is exposed to the internet, consider placing it behind a reverse proxy with TLS.
+- **Chromium download restrictions**: Chromium-based browsers may block file downloads from HTTP origins. Navigate to `chrome://flags/#unsafely-treat-insecure-origin-as-secure`, add your ship's HTTP origins (e.g. `http://nativeplanet.local:8081,http://nativeplanet.local:8090`), enable the flag, and relaunch. Firefox does not have this issue.
+- **No authentication on download server**: The HTTP download server (port 8090) serves files without authentication. Intended for trusted local networks only.
+- **Directory deletion**: Only empty directories can be deleted.
 
 ## License
 

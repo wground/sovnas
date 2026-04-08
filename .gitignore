@@ -3,3 +3,5 @@ ui/dist/
 .DS_Store
 .claude/
 sovnas.config.json
+sovnas-topdys.config.json
+sovnas-donsur-wansyn.config.json

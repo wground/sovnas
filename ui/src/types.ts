@@ -25,6 +25,20 @@ export interface DaemonConfig {
   network: { peers: any[] };
 }
 
+export type SharePerm = 'read' | 'read-write';
+
+export interface Share {
+  path: string;
+  who: string[];   // ship names without ~
+  perm: SharePerm;
+}
+
+export interface RemoteShare {
+  host: string;    // ship name without ~
+  path: string;
+  perm: SharePerm;
+}
+
 export type SortField = 'name' | 'size' | 'modified';
 export type SortDir = 'asc' | 'desc';
 export type ViewMode = 'list' | 'grid';

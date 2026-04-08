@@ -65,6 +65,49 @@
     ^$(s +.rest, acc [(crip (flop seg)) acc])
   $(rest +.rest, seg [i.rest seg])
 ::
+::  +ship-to-cord: render @p as cord without leading ~
+::
+++  ship-to-cord
+  |=  s=@p
+  ^-  @t
+  =/  full=@t  (scot %p s)
+  ::  strip the leading ~
+  =/  tp=tape  (trip full)
+  ?~  tp  full
+  ?.  .=(i.tp '~')  full
+  (crip t.tp)
+::
+::  +cord-to-ship: parse a cord like 'zod' or '~zod' into @p
+::
+++  cord-to-ship
+  |=  c=@t
+  ^-  @p
+  =/  tp=tape  (trip c)
+  ::  prepend ~ if missing
+  =/  full=tape
+    ?~  tp  "~zod"
+    ?:  .=(i.tp '~')  tp
+    ['~' tp]
+  (slav %p (crip full))
+::
+::  +perm-to-cord: serialize share-perm
+::
+++  perm-to-cord
+  |=  p=share-perm:sovnas
+  ^-  @t
+  ?-  p
+    %read        'read'
+    %read-write  'read-write'
+  ==
+::
+::  +cord-to-perm: parse share-perm from cord
+::
+++  cord-to-perm
+  |=  c=@t
+  ^-  share-perm:sovnas
+  ?:  .=(c 'read-write')  %read-write
+  %read
+::
 ::  +update-to-json: serialize an update for the frontend
 ::
 ++  update-to-json
@@ -106,6 +149,52 @@
       ==
     %daemon-config
       (frond:enjs 'daemon-config' s+cfg-json.u)
+    ::
+    ::  share updates
+    ::
+    %shares-list
+      %-  pairs:enjs
+      :~  :-  'shares-list'
+          [%a (turn shares.u share-to-json)]
+      ==
+    %remote-shares-list
+      %-  pairs:enjs
+      :~  :-  'remote-shares-list'
+          [%a (turn shares.u remote-share-to-json)]
+      ==
+    ::
+    ::  remote data relayed to our UI
+    ::
+    %remote-dir-list
+      %-  pairs:enjs
+      :~  :-  'remote-dir-list'
+          %-  pairs:enjs
+          :~  ['host' s+(ship-to-cord host.u)]
+              ['path' s+pof.u]
+              ['entries' [%a (turn entries.u file-entry-to-json)]]
+          ==
+      ==
+    %remote-file-data
+      %-  pairs:enjs
+      :~  :-  'remote-file-data'
+          %-  pairs:enjs
+          :~  ['host' s+(ship-to-cord host.u)]
+              ['path' s+pof.u]
+              ['data' s+data.u]
+              ['mime' s+mime.u]
+              ['size' n+(num-to-cord size.u)]
+          ==
+      ==
+    %remote-op-result
+      %-  pairs:enjs
+      :~  :-  'remote-op-result'
+          %-  pairs:enjs
+          :~  ['host' s+(ship-to-cord host.u)]
+              ['tag' s+tag.u]
+              ['success' b+success.u]
+              ['msg' s+msg.u]
+          ==
+      ==
   ==
 ::
 ++  config-to-json
@@ -128,6 +217,24 @@
       ['modified' n+(num-to-cord (div (sub modified.fe ~1970.1.1) ~s1))]
       ['is-dir' b+is-dir.fe]
       ['mime' s+mime.fe]
+  ==
+::
+++  share-to-json
+  |=  s=share:sovnas
+  ^-  json
+  %-  pairs:enjs
+  :~  ['path' s+pof.s]
+      ['who' [%a (turn ~(tap in who.s) |=(p=@p s+(ship-to-cord p)))]]
+      ['perm' s+(perm-to-cord perm.s)]
+  ==
+::
+++  remote-share-to-json
+  |=  rs=remote-share:sovnas
+  ^-  json
+  %-  pairs:enjs
+  :~  ['host' s+(ship-to-cord host.rs)]
+      ['path' s+pof.rs]
+      ['perm' s+(perm-to-cord perm.rs)]
   ==
 ::
 ::  +action-from-json: parse incoming JSON poke into action
@@ -217,6 +324,306 @@
     =/  inner=json  (~(got by m) 'write-daemon-config')
     ?>  ?=(%s -.inner)
     [%write-daemon-config p.inner]
+  ::
+  ::  share management actions
+  ::
+  ?:  (~(has by m) 'share-folder')
+    =/  inner=json  (~(got by m) 'share-folder')
+    ?>  ?=(%o -.inner)
+    =/  pof-j=json  (~(got by p.inner) 'path')
+    ?>  ?=(%s -.pof-j)
+    =/  who-j=json  (~(got by p.inner) 'who')
+    ?>  ?=(%s -.who-j)
+    =/  perm-j=json  (~(got by p.inner) 'perm')
+    ?>  ?=(%s -.perm-j)
+    [%share-folder p.pof-j (cord-to-ship p.who-j) (cord-to-perm p.perm-j)]
+  ::
+  ?:  (~(has by m) 'unshare-folder')
+    =/  inner=json  (~(got by m) 'unshare-folder')
+    ?>  ?=(%o -.inner)
+    =/  pof-j=json  (~(got by p.inner) 'path')
+    ?>  ?=(%s -.pof-j)
+    =/  who-j=json  (~(got by p.inner) 'who')
+    ?>  ?=(%s -.who-j)
+    [%unshare-folder p.pof-j (cord-to-ship p.who-j)]
+  ::
+  ?:  (~(has by m) 'list-shares')
+    [%list-shares ~]
+  ::
+  ::  remote operation actions
+  ::
+  ?:  (~(has by m) 'remote-ls')
+    =/  inner=json  (~(got by m) 'remote-ls')
+    ?>  ?=(%o -.inner)
+    =/  host-j=json  (~(got by p.inner) 'host')
+    ?>  ?=(%s -.host-j)
+    =/  pof-j=json  (~(got by p.inner) 'path')
+    ?>  ?=(%s -.pof-j)
+    [%remote-ls (cord-to-ship p.host-j) p.pof-j]
+  ::
+  ?:  (~(has by m) 'remote-download')
+    =/  inner=json  (~(got by m) 'remote-download')
+    ?>  ?=(%o -.inner)
+    =/  host-j=json  (~(got by p.inner) 'host')
+    ?>  ?=(%s -.host-j)
+    =/  pof-j=json  (~(got by p.inner) 'path')
+    ?>  ?=(%s -.pof-j)
+    [%remote-download (cord-to-ship p.host-j) p.pof-j]
+  ::
+  ?:  (~(has by m) 'remote-upload')
+    =/  inner=json  (~(got by m) 'remote-upload')
+    ?>  ?=(%o -.inner)
+    =/  host-j=json  (~(got by p.inner) 'host')
+    ?>  ?=(%s -.host-j)
+    =/  nm-j=json  (~(got by p.inner) 'name')
+    ?>  ?=(%s -.nm-j)
+    =/  dir-j=json  (~(got by p.inner) 'dir')
+    ?>  ?=(%s -.dir-j)
+    =/  dt-j=json  (~(got by p.inner) 'data')
+    ?>  ?=(%s -.dt-j)
+    [%remote-upload (cord-to-ship p.host-j) p.nm-j p.dir-j p.dt-j]
+  ::
+  ?:  (~(has by m) 'remote-mkdir')
+    =/  inner=json  (~(got by m) 'remote-mkdir')
+    ?>  ?=(%o -.inner)
+    =/  host-j=json  (~(got by p.inner) 'host')
+    ?>  ?=(%s -.host-j)
+    =/  pof-j=json  (~(got by p.inner) 'path')
+    ?>  ?=(%s -.pof-j)
+    [%remote-mkdir (cord-to-ship p.host-j) p.pof-j]
+  ::
+  ?:  (~(has by m) 'remote-rm')
+    =/  inner=json  (~(got by m) 'remote-rm')
+    ?>  ?=(%o -.inner)
+    =/  host-j=json  (~(got by p.inner) 'host')
+    ?>  ?=(%s -.host-j)
+    =/  pof-j=json  (~(got by p.inner) 'path')
+    ?>  ?=(%s -.pof-j)
+    [%remote-rm (cord-to-ship p.host-j) p.pof-j]
+  ::
+  ?:  (~(has by m) 'list-remote-shares')
+    [%list-remote-shares ~]
+  ::
+  !!
+::
+::  +remote-request-to-json: serialize remote-request for cross-ship poke
+::
+++  remote-request-to-json
+  |=  rr=remote-request:sovnas
+  ^-  json
+  ?-  -.rr
+    %request-ls
+      (frond:enjs 'request-ls' (frond:enjs 'path' s+pof.rr))
+    %request-get
+      (frond:enjs 'request-get' (frond:enjs 'path' s+pof.rr))
+    %request-put
+      %-  pairs:enjs
+      :~  :-  'request-put'
+          %-  pairs:enjs
+          :~  ['name' s+name.rr]
+              ['dir' s+dir.rr]
+              ['data' s+data.rr]
+          ==
+      ==
+    %request-mkdir
+      (frond:enjs 'request-mkdir' (frond:enjs 'path' s+pof.rr))
+    %request-rm
+      (frond:enjs 'request-rm' (frond:enjs 'path' s+pof.rr))
+    %share-offer
+      %-  pairs:enjs
+      :~  :-  'share-offer'
+          :-  %a
+          %+  turn  shares.rr
+          |=  [pof=@t perm=share-perm:sovnas]
+          %-  pairs:enjs
+          :~  ['path' s+pof]
+              ['perm' s+(perm-to-cord perm)]
+          ==
+      ==
+    %share-revoke
+      (frond:enjs 'share-revoke' (frond:enjs 'path' s+pof.rr))
+  ==
+::
+::  +remote-request-from-json: parse cross-ship poke JSON into remote-request
+::
+++  remote-request-from-json
+  |=  j=json
+  ^-  remote-request:sovnas
+  ?>  ?=(%o -.j)
+  =/  m=(map @t json)  p.j
+  ::
+  ?:  (~(has by m) 'request-ls')
+    =/  inner=json  (~(got by m) 'request-ls')
+    ?>  ?=(%o -.inner)
+    =/  pof-j=json  (~(got by p.inner) 'path')
+    ?>  ?=(%s -.pof-j)
+    [%request-ls p.pof-j]
+  ::
+  ?:  (~(has by m) 'request-get')
+    =/  inner=json  (~(got by m) 'request-get')
+    ?>  ?=(%o -.inner)
+    =/  pof-j=json  (~(got by p.inner) 'path')
+    ?>  ?=(%s -.pof-j)
+    [%request-get p.pof-j]
+  ::
+  ?:  (~(has by m) 'request-put')
+    =/  inner=json  (~(got by m) 'request-put')
+    ?>  ?=(%o -.inner)
+    =/  nm=json   (~(got by p.inner) 'name')
+    ?>  ?=(%s -.nm)
+    =/  dr=json   (~(got by p.inner) 'dir')
+    ?>  ?=(%s -.dr)
+    =/  dt=json   (~(got by p.inner) 'data')
+    ?>  ?=(%s -.dt)
+    [%request-put p.nm p.dr p.dt]
+  ::
+  ?:  (~(has by m) 'request-mkdir')
+    =/  inner=json  (~(got by m) 'request-mkdir')
+    ?>  ?=(%o -.inner)
+    =/  pof-j=json  (~(got by p.inner) 'path')
+    ?>  ?=(%s -.pof-j)
+    [%request-mkdir p.pof-j]
+  ::
+  ?:  (~(has by m) 'request-rm')
+    =/  inner=json  (~(got by m) 'request-rm')
+    ?>  ?=(%o -.inner)
+    =/  pof-j=json  (~(got by p.inner) 'path')
+    ?>  ?=(%s -.pof-j)
+    [%request-rm p.pof-j]
+  ::
+  ?:  (~(has by m) 'share-offer')
+    =/  arr=json  (~(got by m) 'share-offer')
+    ?>  ?=(%a -.arr)
+    =/  shares=(list [pof=@t perm=share-perm:sovnas])
+      %+  turn  p.arr
+      |=  e=json
+      ?>  ?=(%o -.e)
+      =/  pof-j=json  (~(got by p.e) 'path')
+      ?>  ?=(%s -.pof-j)
+      =/  perm-j=json  (~(got by p.e) 'perm')
+      ?>  ?=(%s -.perm-j)
+      [p.pof-j (cord-to-perm p.perm-j)]
+    [%share-offer shares]
+  ::
+  ?:  (~(has by m) 'share-revoke')
+    =/  inner=json  (~(got by m) 'share-revoke')
+    ?>  ?=(%o -.inner)
+    =/  pof-j=json  (~(got by p.inner) 'path')
+    ?>  ?=(%s -.pof-j)
+    [%share-revoke p.pof-j]
+  ::
+  !!
+::
+::  +remote-response-to-json: serialize remote-response for cross-ship poke
+::
+++  remote-response-to-json
+  |=  rr=remote-response:sovnas
+  ^-  json
+  ?-  -.rr
+    %remote-dir-list
+      %-  pairs:enjs
+      :~  :-  'remote-dir-list'
+          %-  pairs:enjs
+          :~  ['host' s+(ship-to-cord host.rr)]
+              ['path' s+pof.rr]
+              ['entries' [%a (turn entries.rr file-entry-to-json)]]
+          ==
+      ==
+    %remote-file-data
+      %-  pairs:enjs
+      :~  :-  'remote-file-data'
+          %-  pairs:enjs
+          :~  ['host' s+(ship-to-cord host.rr)]
+              ['path' s+pof.rr]
+              ['data' s+data.rr]
+              ['mime' s+mime.rr]
+              ['size' n+(num-to-cord size.rr)]
+          ==
+      ==
+    %remote-op-result
+      %-  pairs:enjs
+      :~  :-  'remote-op-result'
+          %-  pairs:enjs
+          :~  ['host' s+(ship-to-cord host.rr)]
+              ['tag' s+tag.rr]
+              ['success' b+success.rr]
+              ['msg' s+msg.rr]
+          ==
+      ==
+  ==
+::
+::  +remote-response-from-json: parse cross-ship response poke
+::
+++  remote-response-from-json
+  |=  j=json
+  ^-  remote-response:sovnas
+  ?>  ?=(%o -.j)
+  =/  m=(map @t json)  p.j
+  ::
+  ?:  (~(has by m) 'remote-dir-list')
+    =/  inner=json  (~(got by m) 'remote-dir-list')
+    ?>  ?=(%o -.inner)
+    =/  host-j=json  (~(got by p.inner) 'host')
+    ?>  ?=(%s -.host-j)
+    =/  pof-j=json  (~(got by p.inner) 'path')
+    ?>  ?=(%s -.pof-j)
+    =/  entries-j=json  (~(got by p.inner) 'entries')
+    ?>  ?=(%a -.entries-j)
+    =/  entries=dir-listing:sovnas
+      %+  turn  p.entries-j
+      |=  e=json
+      ?>  ?=(%o -.e)
+      =/  em=(map @t json)  p.e
+      =/  nm-j=json   (~(gut by em) 'name' s+'?')
+      =/  fp-j=json   (~(gut by em) 'full-path' s+'')
+      =/  sz-j=json   (~(gut by em) 'size' n+'0')
+      =/  mod-j=json  (~(gut by em) 'modified' n+'0')
+      =/  dir-j=json  (~(gut by em) 'is-dir' b+%.n)
+      =/  mime-j=json  (~(gut by em) 'mime' s+'')
+      :*  ?:(?=(%s -.nm-j) p.nm-j '?')
+          ?:(?=(%s -.fp-j) p.fp-j '')
+          ?:(?=(%n -.sz-j) (parse-json-num p.sz-j) 0)
+          (add ~1970.1.1 (mul ~s1 ?:(?=(%n -.mod-j) (parse-json-num p.mod-j) 0)))
+          ?:(?=(%b -.dir-j) p.dir-j %.n)
+          ?:(?=(%s -.mime-j) p.mime-j '')
+      ==
+    [%remote-dir-list (cord-to-ship p.host-j) p.pof-j entries]
+  ::
+  ?:  (~(has by m) 'remote-file-data')
+    =/  inner=json  (~(got by m) 'remote-file-data')
+    ?>  ?=(%o -.inner)
+    =/  host-j=json  (~(got by p.inner) 'host')
+    ?>  ?=(%s -.host-j)
+    =/  pof-j=json  (~(got by p.inner) 'path')
+    ?>  ?=(%s -.pof-j)
+    =/  data-j=json  (~(got by p.inner) 'data')
+    ?>  ?=(%s -.data-j)
+    =/  mime-j=json  (~(gut by p.inner) 'mime' s+'application/octet-stream')
+    =/  size-j=json  (~(gut by p.inner) 'size' n+'0')
+    :*  %remote-file-data
+        (cord-to-ship p.host-j)
+        p.pof-j
+        p.data-j
+        ?:(?=(%s -.mime-j) p.mime-j 'application/octet-stream')
+        ?:(?=(%n -.size-j) (parse-json-num p.size-j) 0)
+    ==
+  ::
+  ?:  (~(has by m) 'remote-op-result')
+    =/  inner=json  (~(got by m) 'remote-op-result')
+    ?>  ?=(%o -.inner)
+    =/  host-j=json  (~(got by p.inner) 'host')
+    ?>  ?=(%s -.host-j)
+    =/  tag-j=json  (~(got by p.inner) 'tag')
+    ?>  ?=(%s -.tag-j)
+    =/  suc-j=json  (~(got by p.inner) 'success')
+    ?>  ?=(%b -.suc-j)
+    =/  msg-j=json  (~(gut by p.inner) 'msg' s+'')
+    :*  %remote-op-result
+        (cord-to-ship p.host-j)
+        p.tag-j
+        p.suc-j
+        ?:(?=(%s -.msg-j) p.msg-j '')
+    ==
   ::
   !!
 ::

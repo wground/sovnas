@@ -1,5 +1,5 @@
 import Urbit from '@urbit/http-api';
-import { FileEntry, Config, DaemonConfig } from './types';
+import { FileEntry, Config, DaemonConfig, Share, RemoteShare } from './types';
 
 let api: Urbit | null = null;
 
@@ -22,7 +22,12 @@ export type UpdateEvent =
   | { type: 'op-result'; tag: string; success: boolean; msg: string }
   | { type: 'config-update'; config: Config }
   | { type: 'daemon-status'; connected: boolean }
-  | { type: 'daemon-config'; config: DaemonConfig };
+  | { type: 'daemon-config'; config: DaemonConfig }
+  | { type: 'shares-list'; shares: Share[] }
+  | { type: 'remote-shares-list'; shares: RemoteShare[] }
+  | { type: 'remote-dir-list'; host: string; path: string; entries: FileEntry[] }
+  | { type: 'remote-file-data'; host: string; path: string; data: string; mime: string; size: number }
+  | { type: 'remote-op-result'; host: string; tag: string; success: boolean; msg: string };
 
 function parseUpdate(raw: any): UpdateEvent | null {
   if (raw['dir-list']) {
@@ -66,6 +71,61 @@ function parseUpdate(raw: any): UpdateEvent | null {
       return null;
     }
   }
+  if (raw['shares-list']) {
+    const arr = raw['shares-list'];
+    const shares: Share[] = (Array.isArray(arr) ? arr : []).map((s: any) => ({
+      path: s.path ?? '',
+      who: Array.isArray(s.who) ? s.who : [],
+      perm: s.perm ?? 'read',
+    }));
+    return { type: 'shares-list', shares };
+  }
+  if (raw['remote-shares-list']) {
+    const arr = raw['remote-shares-list'];
+    const shares: RemoteShare[] = (Array.isArray(arr) ? arr : []).map((s: any) => ({
+      host: s.host ?? '',
+      path: s.path ?? '',
+      perm: s.perm ?? 'read',
+    }));
+    return { type: 'remote-shares-list', shares };
+  }
+  if (raw['remote-dir-list']) {
+    const d = raw['remote-dir-list'];
+    return {
+      type: 'remote-dir-list',
+      host: d.host,
+      path: d.path,
+      entries: (d.entries ?? []).map((e: any) => ({
+        name: e.name,
+        fullPath: e['full-path'] ?? '',
+        size: e.size ?? 0,
+        modified: e.modified ?? 0,
+        isDir: e['is-dir'] ?? false,
+        mime: e.mime ?? '',
+      })),
+    };
+  }
+  if (raw['remote-file-data']) {
+    const d = raw['remote-file-data'];
+    return {
+      type: 'remote-file-data',
+      host: d.host,
+      path: d.path,
+      data: d.data,
+      mime: d.mime,
+      size: d.size,
+    };
+  }
+  if (raw['remote-op-result']) {
+    const d = raw['remote-op-result'];
+    return {
+      type: 'remote-op-result',
+      host: d.host,
+      tag: d.tag,
+      success: d.success,
+      msg: d.msg,
+    };
+  }
   return null;
 }
 
@@ -99,7 +159,7 @@ export function subscribe(
 }
 
 // ---------------------------------------------------------------------------
-// Actions
+// Local Actions
 // ---------------------------------------------------------------------------
 
 export async function listDir(path: string): Promise<void> {
@@ -159,6 +219,86 @@ export async function writeDaemonConfig(cfg: DaemonConfig): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Share Management
+// ---------------------------------------------------------------------------
+
+export async function shareFolder(path: string, who: string, perm: string): Promise<void> {
+  await getApi().poke({
+    app: 'sovnas',
+    mark: 'sovnas-action',
+    json: { 'share-folder': { path, who, perm } },
+  });
+}
+
+export async function unshareFolder(path: string, who: string): Promise<void> {
+  await getApi().poke({
+    app: 'sovnas',
+    mark: 'sovnas-action',
+    json: { 'unshare-folder': { path, who } },
+  });
+}
+
+export async function listShares(): Promise<void> {
+  await getApi().poke({
+    app: 'sovnas',
+    mark: 'sovnas-action',
+    json: { 'list-shares': null },
+  });
+}
+
+export async function listRemoteShares(): Promise<void> {
+  await getApi().poke({
+    app: 'sovnas',
+    mark: 'sovnas-action',
+    json: { 'list-remote-shares': null },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Remote Operations
+// ---------------------------------------------------------------------------
+
+export async function remoteLs(host: string, path: string): Promise<void> {
+  await getApi().poke({
+    app: 'sovnas',
+    mark: 'sovnas-action',
+    json: { 'remote-ls': { host, path } },
+  });
+}
+
+export async function remoteDownload(host: string, path: string): Promise<void> {
+  await getApi().poke({
+    app: 'sovnas',
+    mark: 'sovnas-action',
+    json: { 'remote-download': { host, path } },
+  });
+}
+
+export async function remoteUpload(host: string, name: string, dir: string, data: string): Promise<void> {
+  await getApi().poke({
+    app: 'sovnas',
+    mark: 'sovnas-action',
+    json: { 'remote-upload': { host, name, dir, data } },
+  });
+}
+
+export async function remoteMkdir(host: string, path: string): Promise<void> {
+  await getApi().poke({
+    app: 'sovnas',
+    mark: 'sovnas-action',
+    json: { 'remote-mkdir': { host, path } },
+  });
+}
+
+export async function remoteRm(host: string, path: string): Promise<void> {
+  await getApi().poke({
+    app: 'sovnas',
+    mark: 'sovnas-action',
+    json: { 'remote-rm': { host, path } },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // File upload (with chunking for large files)
 // ---------------------------------------------------------------------------
 
@@ -210,4 +350,25 @@ export async function uploadFile(
     });
     onProgress(Math.round(((i + 1) / total) * 100));
   }
+}
+
+// ---------------------------------------------------------------------------
+// Remote file upload (single-shot, no chunking for now)
+// ---------------------------------------------------------------------------
+
+export async function remoteUploadFile(
+  file: File,
+  host: string,
+  dirPath: string,
+  onProgress: (pct: number) => void,
+): Promise<void> {
+  const buffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  const data = btoa(binary);
+
+  await remoteUpload(host, file.name, dirPath, data);
+  onProgress(100);
 }

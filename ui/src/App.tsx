@@ -1,10 +1,18 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { subscribe, listDir, downloadFile, deleteFile, renameFile, mkdir, UpdateEvent } from './api';
-import { FileEntry, Config, DaemonConfig, SortField, SortDir, ViewMode, UploadProgress } from './types';
+import {
+  subscribe, listDir, downloadFile, deleteFile, renameFile, mkdir,
+  remoteLs, UpdateEvent,
+} from './api';
+import {
+  FileEntry, Config, DaemonConfig, Share, RemoteShare,
+  SortField, SortDir, ViewMode, UploadProgress,
+} from './types';
 import FileBrowser from './components/FileBrowser';
 import Toolbar from './components/Toolbar';
 import UploadZone from './components/UploadZone';
 import SettingsPanel from './components/SettingsPanel';
+import SharesPanel from './components/SharesPanel';
+import RemoteBrowser from './components/RemoteBrowser';
 import Breadcrumb from './components/Breadcrumb';
 import Toast from './components/Toast';
 
@@ -23,9 +31,24 @@ export default function App() {
   const [uploads, setUploads] = useState<UploadProgress[]>([]);
   const [daemonConfig, setDaemonConfig] = useState<DaemonConfig | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showShares, setShowShares] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // Share state
+  const [shares, setShares] = useState<Share[]>([]);
+  const [remoteShares, setRemoteShares] = useState<RemoteShare[]>([]);
+
+  // Remote browsing state
+  const [remoteBrowse, setRemoteBrowse] = useState<{
+    host: string;
+    basePath: string;
+    perm: 'read' | 'read-write';
+    currentPath: string;
+    entries: FileEntry[];
+    loading: boolean;
+  } | null>(null);
 
   const showToast = useCallback((msg: string, ok = true) => {
     setToast({ msg, ok });
@@ -45,6 +68,39 @@ export default function App() {
       }
     },
     [showToast],
+  );
+
+  const navigateRemote = useCallback(
+    async (path: string) => {
+      if (!remoteBrowse) return;
+      setRemoteBrowse((rb) => rb ? { ...rb, currentPath: path, loading: true } : rb);
+      try {
+        await remoteLs(remoteBrowse.host, path);
+      } catch {
+        showToast('Failed to list remote directory', false);
+        setRemoteBrowse((rb) => rb ? { ...rb, loading: false } : rb);
+      }
+    },
+    [remoteBrowse, showToast],
+  );
+
+  const openRemoteBrowse = useCallback(
+    (host: string, path: string) => {
+      // find permission from remoteShares
+      const rs = remoteShares.find((s) => s.host === host && s.path === path);
+      const perm = rs?.perm ?? 'read';
+      setRemoteBrowse({
+        host,
+        basePath: path,
+        perm,
+        currentPath: path,
+        entries: [],
+        loading: true,
+      });
+      setShowShares(false);
+      remoteLs(host, path).catch(() => {});
+    },
+    [remoteShares],
   );
 
   useEffect(() => {
@@ -72,7 +128,7 @@ export default function App() {
         URL.revokeObjectURL(url);
       } else if (evt.type === 'op-result') {
         showToast(evt.msg || (evt.success ? 'Done' : 'Error'), evt.success);
-        if (evt.success) listDir(currentPath).catch(() => {});
+        if (evt.success) listDir(currentPathRef.current).catch(() => {});
       } else if (evt.type === 'config-update') {
         setConfig(evt.config);
       } else if (evt.type === 'daemon-status') {
@@ -80,14 +136,47 @@ export default function App() {
         if (!evt.connected) showToast('Daemon disconnected', false);
       } else if (evt.type === 'daemon-config') {
         setDaemonConfig(evt.config);
+      } else if (evt.type === 'shares-list') {
+        setShares(evt.shares);
+      } else if (evt.type === 'remote-shares-list') {
+        setRemoteShares(evt.shares);
+      } else if (evt.type === 'remote-dir-list') {
+        // Update remote browser if we're browsing this host
+        setRemoteBrowse((rb) => {
+          if (!rb || rb.host !== evt.host) return rb;
+          return { ...rb, entries: evt.entries, loading: false };
+        });
+      } else if (evt.type === 'remote-file-data') {
+        // Trigger browser download for remote file
+        const binary = atob(evt.data);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        const blob = new Blob([bytes], { type: evt.mime || 'application/octet-stream' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = evt.path.split('/').pop() ?? 'download';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } else if (evt.type === 'remote-op-result') {
+        showToast(
+          `~${evt.host}: ${evt.msg || (evt.success ? 'Done' : 'Error')}`,
+          evt.success,
+        );
+        // Refresh remote listing on success
+        if (evt.success && remoteBrowse && remoteBrowse.host === evt.host) {
+          remoteLs(remoteBrowse.host, remoteBrowse.currentPath).catch(() => {});
+        }
       }
     };
 
     const unsub = subscribe(handleEvent, () => {
-      setTimeout(() => navigate(currentPath), 2000);
+      setTimeout(() => navigate(currentPathRef.current), 2000);
     });
 
-    navigate(currentPath);
+    navigate(currentPathRef.current);
     return unsub;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -170,11 +259,30 @@ export default function App() {
           title={config.connected ? 'Daemon connected' : 'Daemon disconnected'}
         />
         <div className="flex-1" />
+        {remoteShares.length > 0 && !remoteBrowse && (
+          <span className="text-xs text-gray-400 mr-1">
+            {remoteShares.length} remote share{remoteShares.length !== 1 ? 's' : ''}
+          </span>
+        )}
         <button
-          onClick={() => setShowSettings((s) => !s)}
-          className="text-sm text-gray-500 hover:text-gray-800 px-2 py-1 rounded border border-gray-200 hover:border-gray-400"
+          onClick={() => { setShowShares((s) => !s); setShowSettings(false); }}
+          className={`text-sm px-2 py-1 rounded border ${
+            showShares
+              ? 'border-[#B31B1B] text-[#B31B1B] bg-red-50'
+              : 'text-gray-500 hover:text-gray-800 border-gray-200 hover:border-gray-400'
+          }`}
         >
-          ⚙ Settings
+          Shares
+        </button>
+        <button
+          onClick={() => { setShowSettings((s) => !s); setShowShares(false); }}
+          className={`text-sm px-2 py-1 rounded border ${
+            showSettings
+              ? 'border-[#B31B1B] text-[#B31B1B] bg-red-50'
+              : 'text-gray-500 hover:text-gray-800 border-gray-200 hover:border-gray-400'
+          }`}
+        >
+          Settings
         </button>
       </header>
 
@@ -182,7 +290,32 @@ export default function App() {
         <SettingsPanel config={config} daemonConfig={daemonConfig} onClose={() => setShowSettings(false)} />
       )}
 
+      {showShares && (
+        <SharesPanel
+          shares={shares}
+          remoteShares={remoteShares}
+          onClose={() => setShowShares(false)}
+          onBrowseRemote={openRemoteBrowse}
+        />
+      )}
+
       <div className="max-w-6xl mx-auto px-4 py-4">
+        {/* Remote browser (if active) */}
+        {remoteBrowse && (
+          <RemoteBrowser
+            host={remoteBrowse.host}
+            basePath={remoteBrowse.basePath}
+            perm={remoteBrowse.perm}
+            entries={remoteBrowse.entries}
+            currentRemotePath={remoteBrowse.currentPath}
+            loading={remoteBrowse.loading}
+            onNavigate={navigateRemote}
+            onClose={() => setRemoteBrowse(null)}
+            showToast={showToast}
+          />
+        )}
+
+        {/* Local file browser */}
         <Toolbar
           viewMode={viewMode}
           onViewMode={setViewMode}
@@ -214,7 +347,7 @@ export default function App() {
             onDone={(name) => {
               setUploads((u) => u.filter((x) => x.name !== name));
               showToast(`Uploaded ${name}`);
-              listDir(currentPath).catch(() => {});
+              listDir(currentPathRef.current).catch(() => {});
             }}
             onError={(msg) => showToast(msg, false)}
           />

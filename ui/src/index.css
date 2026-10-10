@@ -2,6 +2,11 @@
 @tailwind components;
 @tailwind utilities;
 
-* {
-  box-sizing: border-box;
+html, body, #root { height: 100%; }
+body { @apply antialiased; }
+
+@layer components {
+  .toolbar-btn {
+    @apply flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800;
+  }
 }

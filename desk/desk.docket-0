@@ -1,10 +1,9 @@
 :~
   title+'SovNAS'
-  info+'Sovereign file storage for your Urbit ship'
+  info+'Your own drive on Urbit. Store files inside your ship or on its host disk, and share them with any other ship.'
   color+0xb3.1b1b
-  base+'sovnas'
   site+/apps/sovnas
-  version+[0 1 0]
-  website+''
+  version+[1 1 0]
+  website+'https://github.com/wground/sovnas'
   license+'MIT'
 ==

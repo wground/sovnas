@@ -1,743 +1,395 @@
 ::  lib/sovnas: helpers for %sovnas
 ::
-/-  sovnas
-=,  format
+/-  *sovnas
 |%
+::  +tr: operations on the in-ship file tree
 ::
-::  +parse-json-num: parse a plain decimal cord like '4096' to @ud
-::  JSON numbers don't use Hoon's dot-separated format, so we
-::  can't use slav %ud or dem:ag.  Manual base-10 accumulator.
+++  tr
+  |_  t=tree
+  ++  dip
+    |=  p=pax
+    ^-  (unit tree)
+    ?~  p  `t
+    =/  kid  (~(get by dir.t) i.p)
+    ?~  kid  ~
+    $(t u.kid, p t.p)
+  ::
+  ++  get
+    |=  p=pax
+    ^-  (unit node)
+    ?~  p  `[%dir *@da]
+    =/  sub  (dip p)
+    ?~(sub ~ fil.u.sub)
+  ::
+  ++  put
+    |=  [p=pax n=node]
+    ^-  tree
+    ?~  p  t(fil `n)
+    =/  kid  (~(gut by dir.t) i.p *tree)
+    t(dir (~(put by dir.t) i.p $(t kid, p t.p)))
+  ::  +graft: place a whole subtree at a path
+  ::
+  ++  graft
+    |=  [p=pax sub=tree]
+    ^-  tree
+    ?~  p  sub
+    =/  kid  (~(gut by dir.t) i.p *tree)
+    t(dir (~(put by dir.t) i.p $(t kid, p t.p)))
+  ::  +lop: remove a subtree, producing [removed remaining]
+  ::
+  ++  lop
+    |=  p=pax
+    ^-  [(unit tree) tree]
+    ?~  p  [`t *tree]
+    =/  kid  (~(get by dir.t) i.p)
+    ?~  kid  [~ t]
+    ?~  t.p
+      [kid t(dir (~(del by dir.t) i.p))]
+    =/  [gon=(unit tree) new=tree]  $(t u.kid, p t.p)
+    [gon t(dir (~(put by dir.t) i.p new))]
+  ::  +touch: set mod time on every directory along a path
+  ::
+  ++  touch
+    |=  [p=pax now=@da]
+    ^-  tree
+    =/  fil=(unit node)  fil.t
+    =?  fil  !?=([~ %file *] fil)  `[%dir now]
+    =.  t  [fil dir.t]
+    ?~  p  t
+    =/  kid  (~(gut by dir.t) i.p *tree)
+    t(dir (~(put by dir.t) i.p $(t kid, p t.p)))
+  ::
+  ++  ls
+    ^-  (list entry)
+    %+  turn  ~(tap by dir.t)
+    |=  [name=@t sub=tree]
+    ^-  entry
+    ?~  fil.sub  [name & 0 *@da '']
+    ?-  -.u.fil.sub
+      %dir   [name & 0 mod.u.fil.sub '']
+      %file  =*  m  meta.u.fil.sub
+             [name | size.m mod.m mime.m]
+    ==
+  ::  +files: every file in the tree, with its path
+  ::
+  ++  files
+    ^-  (list [pax meta])
+    =|  acc=(list [pax meta])
+    =/  stack=(list [pax tree])  ~[[~ t]]
+    |-
+    ?~  stack  acc
+    =/  pre=pax  -.i.stack
+    =/  sub=tree  +.i.stack
+    =/  f=(unit node)  fil.sub
+    =?  acc  ?=([~ %file *] f)  [[pre meta.u.f] acc]
+    =/  kids=(list [pax tree])
+      %+  turn  ~(tap by dir.sub)
+      |=([n=@t k=tree] [(snoc pre n) k])
+    $(stack (weld kids t.stack))
+  --
 ::
-++  parse-json-num
-  |=  t=@t
-  ^-  @ud
-  =/  tap=tape  (trip t)
-  =/  acc=@ud  0
-  |-
-  ?~  tap  acc
-  ?.  &((gte i.tap '0') (lte i.tap '9'))
-    acc
-  $(tap t.tap, acc (add (mul acc 10) (sub i.tap '0')))
+::  paths
 ::
-::  +num-to-cord: render @ud as a plain decimal cord (no Hoon dots)
-::  e.g. 524288000 -> '524288000', not '524.288.000'
-::  Required for JSON %n values which must be valid JSON numbers.
-::
-++  num-to-cord
-  |=  n=@ud
-  ^-  @t
-  ?:  =(0 n)  '0'
-  =/  digits=tape  ~
-  |-
-  ?:  =(0 n)  (crip digits)
-  $(n (div n 10), digits [(add '0' (mod n 10)) digits])
-::
-::  +path-to-cord: convert a hoon path to a cord like '/foo/bar/baz'
-::
-++  path-to-cord
-  |=  p=path
+++  pax-to-cord
+  |=  p=pax
   ^-  @t
   ?~  p  '/'
-  =/  segs=(list tape)
-    (turn p |=(s=@ta (trip s)))
-  %-  crip
-  %-  zing
-  (turn segs |=(s=tape (weld "/" s)))
+  (rap 3 (turn p |=(s=@t (cat 3 '/' s))))
 ::
-::  +cord-to-path: parse '/foo/bar/baz' into a hoon path
-::
-++  cord-to-path
+++  cord-to-pax
   |=  c=@t
-  ^-  path
-  =/  t=tape  (trip c)
-  ::  strip leading slash
-  =/  s=tape  ?~(t ~ ?:(.=(i.t '/') +.t t))
-  =/  acc=(list @ta)  ~
+  ^-  pax
+  %+  skip
+    ^-  (list @t)
+    %+  turn  (split (trip c) '/')
+    crip
+  |=(s=@t =('' s))
+::
+++  split
+  |=  [t=tape c=@tD]
+  ^-  (list tape)
+  =|  cur=tape
+  =|  out=(list tape)
   |-
-  ?~  s  (flop acc)
-  ::  find next '/'
-  =/  seg=tape  ~
-  =/  rest=tape  s
+  ?~  t  (flop [(flop cur) out])
+  ?:  =(i.t c)  $(t t.t, out [(flop cur) out], cur ~)
+  $(t t.t, cur [i.t cur])
+::  +good-name: a legal file or folder name
+::
+++  good-name
+  |=  n=@t
+  ^-  ?
+  ?&  !=('' n)
+      !=('.' n)
+      !=('..' n)
+      (lte (met 3 n) 255)
+      ?=(~ (find "/" (trip n)))
+      ?=(~ (find [`@`0 ~] (trip n)))
+  ==
+::
+++  good-pax
+  |=  p=pax
+  ^-  ?
+  (levy p good-name)
+::
+++  is-prefix
+  |=  [a=pax b=pax]
+  ^-  ?
+  =((scag (lent a) b) a)
+::
+++  last-name
+  |=  p=pax
+  ^-  @t
+  ?~  p  ''
+  (rear p)
+::
+++  parent
+  |=  p=pax
+  ^-  pax
+  ?~  p  ~
+  (snip `pax`p)
+::  +bump-name: "a.txt" -> "a (1).txt"
+::
+++  bump-name
+  |=  [n=@t i=@ud]
+  ^-  @t
+  =/  t=tape  (trip n)
+  =/  dot=(unit @ud)
+    =/  idx  (fand "." t)
+    ?~  idx  ~
+    =/  l  (rear idx)
+    ?:(=(0 l) ~ `l)
+  =/  num=tape  " ({(a-co:co i)})"
+  ?~  dot  (crip (weld t num))
+  (crip :(weld (scag u.dot t) num (slag u.dot t)))
+::
+::  mime types
+::
+++  ext-of
+  |=  n=@t
+  ^-  @t
+  =/  t=tape  (cass (trip n))
+  =/  idx  (fand "." t)
+  ?~  idx  ''
+  (crip (slag +((rear idx)) t))
+::
+++  guess-mime
+  |=  n=@t
+  ^-  @t
+  =/  e  (ext-of n)
+  =/  m=(map @t @t)
+    %-  malt
+    ^-  (list [@t @t])
+    :~  ['txt' 'text/plain']  ['md' 'text/markdown']
+        ['csv' 'text/csv']  ['tsv' 'text/tab-separated-values']
+        ['log' 'text/plain']  ['hoon' 'text/plain']
+        ['html' 'text/html']  ['htm' 'text/html']
+        ['css' 'text/css']  ['js' 'text/javascript']
+        ['mjs' 'text/javascript']  ['ts' 'text/plain']
+        ['tsx' 'text/plain']  ['jsx' 'text/plain']
+        ['py' 'text/x-python']  ['rs' 'text/plain']
+        ['go' 'text/plain']  ['c' 'text/plain']  ['h' 'text/plain']
+        ['cpp' 'text/plain']  ['java' 'text/plain']  ['sh' 'text/plain']
+        ['json' 'application/json']  ['xml' 'application/xml']
+        ['yaml' 'text/yaml']  ['yml' 'text/yaml']  ['toml' 'text/plain']
+        ['pdf' 'application/pdf']  ['rtf' 'application/rtf']
+        ['png' 'image/png']  ['jpg' 'image/jpeg']  ['jpeg' 'image/jpeg']
+        ['gif' 'image/gif']  ['webp' 'image/webp']  ['svg' 'image/svg+xml']
+        ['avif' 'image/avif']  ['bmp' 'image/bmp']  ['ico' 'image/x-icon']
+        ['heic' 'image/heic']  ['tif' 'image/tiff']  ['tiff' 'image/tiff']
+        ['mp3' 'audio/mpeg']  ['wav' 'audio/wav']  ['flac' 'audio/flac']
+        ['ogg' 'audio/ogg']  ['m4a' 'audio/mp4']  ['opus' 'audio/opus']
+        ['mp4' 'video/mp4']  ['m4v' 'video/mp4']  ['webm' 'video/webm']
+        ['mov' 'video/quicktime']  ['mkv' 'video/x-matroska']
+        ['zip' 'application/zip']  ['gz' 'application/gzip']
+        ['tar' 'application/x-tar']  ['7z' 'application/x-7z-compressed']
+        ['doc' 'application/msword']  ['xls' 'application/vnd.ms-excel']
+        ['docx' 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
+        ['xlsx' 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']
+        ['pptx' 'application/vnd.openxmlformats-officedocument.presentationml.presentation']
+        ['odt' 'application/vnd.oasis.opendocument.text']
+        ['epub' 'application/epub+zip']  ['wasm' 'application/wasm']
+    ==
+  (~(gut by m) e 'application/octet-stream')
+::  +risky-mime: types a browser could execute; never render inline
+::
+++  risky-mime
+  |=  m=@t
+  ^-  ?
+  =/  t=tape  (cass (trip m))
+  ?|  =(t "text/html")
+      =(t "application/xhtml+xml")
+      =(t "image/svg+xml")
+      =(t "application/xml")
+      =(t "text/xml")
+      =(t "text/javascript")
+      =(t "application/javascript")
+  ==
+::
+::  urls
+::
+::  +parse-url: split a request url into decoded segments and query
+::
+++  parse-url
+  |=  url=@t
+  ^-  [segs=(list @t) args=(map @t @t)]
+  =/  t=tape  (trip url)
+  =/  q=(unit @ud)  (find "?" t)
+  =/  pat=tape  ?~(q t (scag u.q t))
+  =/  qry=tape  ?~(q ~ (slag +(u.q) t))
+  :-  %+  turn
+        %+  skip  (split pat '/')
+        |=(s=tape =(~ s))
+      |=(s=tape (decode s))
+  %-  malt
+  %+  turn
+    %+  skip  (split qry '&')
+    |=(s=tape =(~ s))
+  |=  kv=tape
+  ^-  [@t @t]
+  =/  e=(unit @ud)  (find "=" kv)
+  ?~  e  [(decode kv) '']
+  [(decode (scag u.e kv)) (decode (slag +(u.e) kv))]
+::
+++  decode
+  |=  t=tape
+  ^-  @t
+  =/  plus  (turn t |=(c=@tD ?:(=('+' c) ' ' c)))
+  (crip (fall (de-urlt:html plus) plus))
+::
+++  encode
+  |=  c=@t
+  ^-  @t
+  (crip (en-urlt:html (trip c)))
+::
+++  get-hed
+  |=  [k=@t hs=header-list:http]
+  ^-  (unit @t)
+  =/  lk  (crip (cass (trip k)))
   |-
-  ?~  rest
-    ^$(s ~, acc [(crip (flop seg)) acc])
-  ?:  .=(i.rest '/')
-    ^$(s +.rest, acc [(crip (flop seg)) acc])
-  $(rest +.rest, seg [i.rest seg])
+  ?~  hs  ~
+  ?:  =(lk (crip (cass (trip key.i.hs))))  `value.i.hs
+  $(hs t.hs)
+::  +parse-range: "bytes=a-b" against a file size
 ::
-::  +ship-to-cord: render @p as cord without leading ~
-::
-++  ship-to-cord
-  |=  s=@p
-  ^-  @t
-  =/  full=@t  (scot %p s)
-  ::  strip the leading ~
-  =/  tp=tape  (trip full)
-  ?~  tp  full
-  ?.  .=(i.tp '~')  full
-  (crip t.tp)
-::
-::  +cord-to-ship: parse a cord like 'zod' or '~zod' into @p
-::
-++  cord-to-ship
-  |=  c=@t
-  ^-  @p
-  =/  tp=tape  (trip c)
-  ::  prepend ~ if missing
-  =/  full=tape
-    ?~  tp  "~zod"
-    ?:  .=(i.tp '~')  tp
-    ['~' tp]
-  (slav %p (crip full))
-::
-::  +perm-to-cord: serialize share-perm
-::
-++  perm-to-cord
-  |=  p=share-perm:sovnas
-  ^-  @t
-  ?-  p
-    %read        'read'
-    %read-write  'read-write'
-  ==
-::
-::  +cord-to-perm: parse share-perm from cord
-::
-++  cord-to-perm
-  |=  c=@t
-  ^-  share-perm:sovnas
-  ?:  .=(c 'read-write')  %read-write
-  %read
-::
-::  +update-to-json: serialize an update for the frontend
-::
-++  update-to-json
-  |=  u=update:sovnas
-  ^-  json
-  ?-  -.u
-    %dir-list
-      %-  pairs:enjs
-      :~  :-  'dir-list'
-          %-  pairs:enjs
-          :~  ['path' s+(path-to-cord path.u)]
-              ['entries' [%a (turn entries.u file-entry-to-json)]]
-          ==
+++  parse-range
+  |=  [h=(unit @t) size=@ud]
+  ^-  (unit [off=@ud len=@ud])
+  ?~  h  ~
+  =/  r
+    %+  rush  u.h
+    ;~  pfix  (jest 'bytes=')
+      ;~  plug
+        (punt dem)
+        ;~(pfix hep (punt dem))
       ==
-    %file-data
-      %-  pairs:enjs
-      :~  :-  'file-data'
-          %-  pairs:enjs
-          :~  ['path' s+(path-to-cord path.u)]
-              ['data' s+data.u]
-              ['mime' s+mime.u]
-              ['size' n+(num-to-cord size.u)]
-          ==
-      ==
-    %op-result
-      %-  pairs:enjs
-      :~  :-  'op-result'
-          %-  pairs:enjs
-          :~  ['tag' s+tag.u]
-              ['success' b+success.u]
-              ['msg' s+msg.u]
-          ==
-      ==
-    %config-update
-      (frond:enjs 'config-update' (config-to-json config.u))
-    %daemon-status
-      %-  pairs:enjs
-      :~  ['daemon-status' (frond:enjs 'connected' b+connected.u)]
-      ==
-    %daemon-config
-      (frond:enjs 'daemon-config' s+cfg-json.u)
-    ::
-    ::  share updates
-    ::
-    %shares-list
-      %-  pairs:enjs
-      :~  :-  'shares-list'
-          [%a (turn shares.u share-to-json)]
-      ==
-    %remote-shares-list
-      %-  pairs:enjs
-      :~  :-  'remote-shares-list'
-          [%a (turn shares.u remote-share-to-json)]
-      ==
-    ::
-    ::  remote data relayed to our UI
-    ::
-    %remote-dir-list
-      %-  pairs:enjs
-      :~  :-  'remote-dir-list'
-          %-  pairs:enjs
-          :~  ['host' s+(ship-to-cord host.u)]
-              ['path' s+pof.u]
-              ['entries' [%a (turn entries.u file-entry-to-json)]]
-          ==
-      ==
-    %remote-file-data
-      %-  pairs:enjs
-      :~  :-  'remote-file-data'
-          %-  pairs:enjs
-          :~  ['host' s+(ship-to-cord host.u)]
-              ['path' s+pof.u]
-              ['data' s+data.u]
-              ['mime' s+mime.u]
-              ['size' n+(num-to-cord size.u)]
-          ==
-      ==
-    %remote-op-result
-      %-  pairs:enjs
-      :~  :-  'remote-op-result'
-          %-  pairs:enjs
-          :~  ['host' s+(ship-to-cord host.u)]
-              ['tag' s+tag.u]
-              ['success' b+success.u]
-              ['msg' s+msg.u]
-          ==
-      ==
-  ==
-::
-++  config-to-json
-  |=  c=config:sovnas
-  ^-  json
-  %-  pairs:enjs
-  :~  ['root' s+(path-to-cord root.c)]
-      ['max-file-size' n+(num-to-cord max-file-size.c)]
-      ['connected' b+connected.c]
-  ==
-::
-++  file-entry-to-json
-  |=  fe=file-entry:sovnas
-  ^-  json
-  %-  pairs:enjs
-  :~  ['name' s+name.fe]
-      ['full-path' s+full-path.fe]
-      ['size' n+(num-to-cord size.fe)]
-      ::  modified: convert @da to unix seconds
-      ['modified' n+(num-to-cord (div (sub modified.fe ~1970.1.1) ~s1))]
-      ['is-dir' b+is-dir.fe]
-      ['mime' s+mime.fe]
-  ==
-::
-++  share-to-json
-  |=  s=share:sovnas
-  ^-  json
-  %-  pairs:enjs
-  :~  ['path' s+pof.s]
-      ['who' [%a (turn ~(tap in who.s) |=(p=@p s+(ship-to-cord p)))]]
-      ['perm' s+(perm-to-cord perm.s)]
-  ==
-::
-++  remote-share-to-json
-  |=  rs=remote-share:sovnas
-  ^-  json
-  %-  pairs:enjs
-  :~  ['host' s+(ship-to-cord host.rs)]
-      ['path' s+pof.rs]
-      ['perm' s+(perm-to-cord perm.rs)]
-  ==
-::
-::  +action-from-json: parse incoming JSON poke into action
-::
-++  action-from-json
-  |=  j=json
-  ^-  action:sovnas
-  ?>  ?=(%o -.j)
-  =/  m=(map @t json)  p.j
-  ::
-  ?:  (~(has by m) 'list-dir')
-    =/  inner=json  (~(got by m) 'list-dir')
-    ?>  ?=(%o -.inner)
-    =/  pth=json  (~(got by p.inner) 'path')
-    ?>  ?=(%s -.pth)
-    [%list-dir (cord-to-path p.pth)]
-  ::
-  ?:  (~(has by m) 'upload')
-    =/  inner=json  (~(got by m) 'upload')
-    ?>  ?=(%o -.inner)
-    =/  nm=json   (~(got by p.inner) 'name')
-    ?>  ?=(%s -.nm)
-    =/  dr=json   (~(got by p.inner) 'dir')
-    ?>  ?=(%s -.dr)
-    =/  dt=json   (~(got by p.inner) 'data')
-    ?>  ?=(%s -.dt)
-    [%upload p.nm (cord-to-path p.dr) p.dt]
-  ::
-  ?:  (~(has by m) 'upload-chunk')
-    =/  inner=json  (~(got by m) 'upload-chunk')
-    ?>  ?=(%o -.inner)
-    =/  nm=json   (~(got by p.inner) 'name')
-    ?>  ?=(%s -.nm)
-    =/  dr=json   (~(got by p.inner) 'dir')
-    ?>  ?=(%s -.dr)
-    =/  idx=json  (~(got by p.inner) 'idx')
-    ?>  ?=(%n -.idx)
-    =/  tot=json  (~(got by p.inner) 'total')
-    ?>  ?=(%n -.tot)
-    =/  dt=json   (~(got by p.inner) 'data')
-    ?>  ?=(%s -.dt)
-    [%upload-chunk p.nm (cord-to-path p.dr) (parse-json-num p.idx) (parse-json-num p.tot) p.dt]
-  ::
-  ?:  (~(has by m) 'download')
-    =/  inner=json  (~(got by m) 'download')
-    ?>  ?=(%o -.inner)
-    =/  pth=json  (~(got by p.inner) 'path')
-    ?>  ?=(%s -.pth)
-    [%download (cord-to-path p.pth)]
-  ::
-  ?:  (~(has by m) 'delete')
-    =/  inner=json  (~(got by m) 'delete')
-    ?>  ?=(%o -.inner)
-    =/  pth=json  (~(got by p.inner) 'path')
-    ?>  ?=(%s -.pth)
-    [%delete (cord-to-path p.pth)]
-  ::
-  ?:  (~(has by m) 'rename')
-    =/  inner=json  (~(got by m) 'rename')
-    ?>  ?=(%o -.inner)
-    =/  sr=json   (~(got by p.inner) 'src')
-    ?>  ?=(%s -.sr)
-    =/  ds=json   (~(got by p.inner) 'dst')
-    ?>  ?=(%s -.ds)
-    [%rename (cord-to-path p.sr) (cord-to-path p.ds)]
-  ::
-  ?:  (~(has by m) 'mkdir')
-    =/  inner=json  (~(got by m) 'mkdir')
-    ?>  ?=(%o -.inner)
-    =/  pth=json  (~(got by p.inner) 'path')
-    ?>  ?=(%s -.pth)
-    [%mkdir (cord-to-path p.pth)]
-  ::
-  ?:  (~(has by m) 'set-config')
-    =/  inner=json  (~(got by m) 'set-config')
-    ?>  ?=(%o -.inner)
-    =/  rt=json   (~(got by p.inner) 'root')
-    ?>  ?=(%s -.rt)
-    =/  ms=json   (~(gut by p.inner) 'max-file-size' n+'524288000')
-    ?>  ?=(%n -.ms)
-    [%set-config (cord-to-path p.rt) (parse-json-num p.ms) %.n]
-  ::
-  ?:  (~(has by m) 'read-daemon-config')
-    [%read-daemon-config ~]
-  ::
-  ?:  (~(has by m) 'write-daemon-config')
-    =/  inner=json  (~(got by m) 'write-daemon-config')
-    ?>  ?=(%s -.inner)
-    [%write-daemon-config p.inner]
-  ::
-  ::  share management actions
-  ::
-  ?:  (~(has by m) 'share-folder')
-    =/  inner=json  (~(got by m) 'share-folder')
-    ?>  ?=(%o -.inner)
-    =/  pof-j=json  (~(got by p.inner) 'path')
-    ?>  ?=(%s -.pof-j)
-    =/  who-j=json  (~(got by p.inner) 'who')
-    ?>  ?=(%s -.who-j)
-    =/  perm-j=json  (~(got by p.inner) 'perm')
-    ?>  ?=(%s -.perm-j)
-    [%share-folder p.pof-j (cord-to-ship p.who-j) (cord-to-perm p.perm-j)]
-  ::
-  ?:  (~(has by m) 'unshare-folder')
-    =/  inner=json  (~(got by m) 'unshare-folder')
-    ?>  ?=(%o -.inner)
-    =/  pof-j=json  (~(got by p.inner) 'path')
-    ?>  ?=(%s -.pof-j)
-    =/  who-j=json  (~(got by p.inner) 'who')
-    ?>  ?=(%s -.who-j)
-    [%unshare-folder p.pof-j (cord-to-ship p.who-j)]
-  ::
-  ?:  (~(has by m) 'list-shares')
-    [%list-shares ~]
-  ::
-  ::  remote operation actions
-  ::
-  ?:  (~(has by m) 'remote-ls')
-    =/  inner=json  (~(got by m) 'remote-ls')
-    ?>  ?=(%o -.inner)
-    =/  host-j=json  (~(got by p.inner) 'host')
-    ?>  ?=(%s -.host-j)
-    =/  pof-j=json  (~(got by p.inner) 'path')
-    ?>  ?=(%s -.pof-j)
-    [%remote-ls (cord-to-ship p.host-j) p.pof-j]
-  ::
-  ?:  (~(has by m) 'remote-download')
-    =/  inner=json  (~(got by m) 'remote-download')
-    ?>  ?=(%o -.inner)
-    =/  host-j=json  (~(got by p.inner) 'host')
-    ?>  ?=(%s -.host-j)
-    =/  pof-j=json  (~(got by p.inner) 'path')
-    ?>  ?=(%s -.pof-j)
-    [%remote-download (cord-to-ship p.host-j) p.pof-j]
-  ::
-  ?:  (~(has by m) 'remote-upload')
-    =/  inner=json  (~(got by m) 'remote-upload')
-    ?>  ?=(%o -.inner)
-    =/  host-j=json  (~(got by p.inner) 'host')
-    ?>  ?=(%s -.host-j)
-    =/  nm-j=json  (~(got by p.inner) 'name')
-    ?>  ?=(%s -.nm-j)
-    =/  dir-j=json  (~(got by p.inner) 'dir')
-    ?>  ?=(%s -.dir-j)
-    =/  dt-j=json  (~(got by p.inner) 'data')
-    ?>  ?=(%s -.dt-j)
-    [%remote-upload (cord-to-ship p.host-j) p.nm-j p.dir-j p.dt-j]
-  ::
-  ?:  (~(has by m) 'remote-mkdir')
-    =/  inner=json  (~(got by m) 'remote-mkdir')
-    ?>  ?=(%o -.inner)
-    =/  host-j=json  (~(got by p.inner) 'host')
-    ?>  ?=(%s -.host-j)
-    =/  pof-j=json  (~(got by p.inner) 'path')
-    ?>  ?=(%s -.pof-j)
-    [%remote-mkdir (cord-to-ship p.host-j) p.pof-j]
-  ::
-  ?:  (~(has by m) 'remote-rm')
-    =/  inner=json  (~(got by m) 'remote-rm')
-    ?>  ?=(%o -.inner)
-    =/  host-j=json  (~(got by p.inner) 'host')
-    ?>  ?=(%s -.host-j)
-    =/  pof-j=json  (~(got by p.inner) 'path')
-    ?>  ?=(%s -.pof-j)
-    [%remote-rm (cord-to-ship p.host-j) p.pof-j]
-  ::
-  ?:  (~(has by m) 'list-remote-shares')
-    [%list-remote-shares ~]
-  ::
-  !!
-::
-::  +remote-request-to-json: serialize remote-request for cross-ship poke
-::
-++  remote-request-to-json
-  |=  rr=remote-request:sovnas
-  ^-  json
-  ?-  -.rr
-    %request-ls
-      (frond:enjs 'request-ls' (frond:enjs 'path' s+pof.rr))
-    %request-get
-      (frond:enjs 'request-get' (frond:enjs 'path' s+pof.rr))
-    %request-put
-      %-  pairs:enjs
-      :~  :-  'request-put'
-          %-  pairs:enjs
-          :~  ['name' s+name.rr]
-              ['dir' s+dir.rr]
-              ['data' s+data.rr]
-          ==
-      ==
-    %request-mkdir
-      (frond:enjs 'request-mkdir' (frond:enjs 'path' s+pof.rr))
-    %request-rm
-      (frond:enjs 'request-rm' (frond:enjs 'path' s+pof.rr))
-    %share-offer
-      %-  pairs:enjs
-      :~  :-  'share-offer'
-          :-  %a
-          %+  turn  shares.rr
-          |=  [pof=@t perm=share-perm:sovnas]
-          %-  pairs:enjs
-          :~  ['path' s+pof]
-              ['perm' s+(perm-to-cord perm)]
-          ==
-      ==
-    %share-revoke
-      (frond:enjs 'share-revoke' (frond:enjs 'path' s+pof.rr))
-  ==
-::
-::  +remote-request-from-json: parse cross-ship poke JSON into remote-request
-::
-++  remote-request-from-json
-  |=  j=json
-  ^-  remote-request:sovnas
-  ?>  ?=(%o -.j)
-  =/  m=(map @t json)  p.j
-  ::
-  ?:  (~(has by m) 'request-ls')
-    =/  inner=json  (~(got by m) 'request-ls')
-    ?>  ?=(%o -.inner)
-    =/  pof-j=json  (~(got by p.inner) 'path')
-    ?>  ?=(%s -.pof-j)
-    [%request-ls p.pof-j]
-  ::
-  ?:  (~(has by m) 'request-get')
-    =/  inner=json  (~(got by m) 'request-get')
-    ?>  ?=(%o -.inner)
-    =/  pof-j=json  (~(got by p.inner) 'path')
-    ?>  ?=(%s -.pof-j)
-    [%request-get p.pof-j]
-  ::
-  ?:  (~(has by m) 'request-put')
-    =/  inner=json  (~(got by m) 'request-put')
-    ?>  ?=(%o -.inner)
-    =/  nm=json   (~(got by p.inner) 'name')
-    ?>  ?=(%s -.nm)
-    =/  dr=json   (~(got by p.inner) 'dir')
-    ?>  ?=(%s -.dr)
-    =/  dt=json   (~(got by p.inner) 'data')
-    ?>  ?=(%s -.dt)
-    [%request-put p.nm p.dr p.dt]
-  ::
-  ?:  (~(has by m) 'request-mkdir')
-    =/  inner=json  (~(got by m) 'request-mkdir')
-    ?>  ?=(%o -.inner)
-    =/  pof-j=json  (~(got by p.inner) 'path')
-    ?>  ?=(%s -.pof-j)
-    [%request-mkdir p.pof-j]
-  ::
-  ?:  (~(has by m) 'request-rm')
-    =/  inner=json  (~(got by m) 'request-rm')
-    ?>  ?=(%o -.inner)
-    =/  pof-j=json  (~(got by p.inner) 'path')
-    ?>  ?=(%s -.pof-j)
-    [%request-rm p.pof-j]
-  ::
-  ?:  (~(has by m) 'share-offer')
-    =/  arr=json  (~(got by m) 'share-offer')
-    ?>  ?=(%a -.arr)
-    =/  shares=(list [pof=@t perm=share-perm:sovnas])
-      %+  turn  p.arr
-      |=  e=json
-      ?>  ?=(%o -.e)
-      =/  pof-j=json  (~(got by p.e) 'path')
-      ?>  ?=(%s -.pof-j)
-      =/  perm-j=json  (~(got by p.e) 'perm')
-      ?>  ?=(%s -.perm-j)
-      [p.pof-j (cord-to-perm p.perm-j)]
-    [%share-offer shares]
-  ::
-  ?:  (~(has by m) 'share-revoke')
-    =/  inner=json  (~(got by m) 'share-revoke')
-    ?>  ?=(%o -.inner)
-    =/  pof-j=json  (~(got by p.inner) 'path')
-    ?>  ?=(%s -.pof-j)
-    [%share-revoke p.pof-j]
-  ::
-  !!
-::
-::  +remote-response-to-json: serialize remote-response for cross-ship poke
-::
-++  remote-response-to-json
-  |=  rr=remote-response:sovnas
-  ^-  json
-  ?-  -.rr
-    %remote-dir-list
-      %-  pairs:enjs
-      :~  :-  'remote-dir-list'
-          %-  pairs:enjs
-          :~  ['host' s+(ship-to-cord host.rr)]
-              ['path' s+pof.rr]
-              ['entries' [%a (turn entries.rr file-entry-to-json)]]
-          ==
-      ==
-    %remote-file-data
-      %-  pairs:enjs
-      :~  :-  'remote-file-data'
-          %-  pairs:enjs
-          :~  ['host' s+(ship-to-cord host.rr)]
-              ['path' s+pof.rr]
-              ['data' s+data.rr]
-              ['mime' s+mime.rr]
-              ['size' n+(num-to-cord size.rr)]
-          ==
-      ==
-    %remote-op-result
-      %-  pairs:enjs
-      :~  :-  'remote-op-result'
-          %-  pairs:enjs
-          :~  ['host' s+(ship-to-cord host.rr)]
-              ['tag' s+tag.rr]
-              ['success' b+success.rr]
-              ['msg' s+msg.rr]
-          ==
-      ==
-  ==
-::
-::  +remote-response-from-json: parse cross-ship response poke
-::
-++  remote-response-from-json
-  |=  j=json
-  ^-  remote-response:sovnas
-  ?>  ?=(%o -.j)
-  =/  m=(map @t json)  p.j
-  ::
-  ?:  (~(has by m) 'remote-dir-list')
-    =/  inner=json  (~(got by m) 'remote-dir-list')
-    ?>  ?=(%o -.inner)
-    =/  host-j=json  (~(got by p.inner) 'host')
-    ?>  ?=(%s -.host-j)
-    =/  pof-j=json  (~(got by p.inner) 'path')
-    ?>  ?=(%s -.pof-j)
-    =/  entries-j=json  (~(got by p.inner) 'entries')
-    ?>  ?=(%a -.entries-j)
-    =/  entries=dir-listing:sovnas
-      %+  turn  p.entries-j
-      |=  e=json
-      ?>  ?=(%o -.e)
-      =/  em=(map @t json)  p.e
-      =/  nm-j=json   (~(gut by em) 'name' s+'?')
-      =/  fp-j=json   (~(gut by em) 'full-path' s+'')
-      =/  sz-j=json   (~(gut by em) 'size' n+'0')
-      =/  mod-j=json  (~(gut by em) 'modified' n+'0')
-      =/  dir-j=json  (~(gut by em) 'is-dir' b+%.n)
-      =/  mime-j=json  (~(gut by em) 'mime' s+'')
-      :*  ?:(?=(%s -.nm-j) p.nm-j '?')
-          ?:(?=(%s -.fp-j) p.fp-j '')
-          ?:(?=(%n -.sz-j) (parse-json-num p.sz-j) 0)
-          (add ~1970.1.1 (mul ~s1 ?:(?=(%n -.mod-j) (parse-json-num p.mod-j) 0)))
-          ?:(?=(%b -.dir-j) p.dir-j %.n)
-          ?:(?=(%s -.mime-j) p.mime-j '')
-      ==
-    [%remote-dir-list (cord-to-ship p.host-j) p.pof-j entries]
-  ::
-  ?:  (~(has by m) 'remote-file-data')
-    =/  inner=json  (~(got by m) 'remote-file-data')
-    ?>  ?=(%o -.inner)
-    =/  host-j=json  (~(got by p.inner) 'host')
-    ?>  ?=(%s -.host-j)
-    =/  pof-j=json  (~(got by p.inner) 'path')
-    ?>  ?=(%s -.pof-j)
-    =/  data-j=json  (~(got by p.inner) 'data')
-    ?>  ?=(%s -.data-j)
-    =/  mime-j=json  (~(gut by p.inner) 'mime' s+'application/octet-stream')
-    =/  size-j=json  (~(gut by p.inner) 'size' n+'0')
-    :*  %remote-file-data
-        (cord-to-ship p.host-j)
-        p.pof-j
-        p.data-j
-        ?:(?=(%s -.mime-j) p.mime-j 'application/octet-stream')
-        ?:(?=(%n -.size-j) (parse-json-num p.size-j) 0)
     ==
-  ::
-  ?:  (~(has by m) 'remote-op-result')
-    =/  inner=json  (~(got by m) 'remote-op-result')
-    ?>  ?=(%o -.inner)
-    =/  host-j=json  (~(got by p.inner) 'host')
-    ?>  ?=(%s -.host-j)
-    =/  tag-j=json  (~(got by p.inner) 'tag')
-    ?>  ?=(%s -.tag-j)
-    =/  suc-j=json  (~(got by p.inner) 'success')
-    ?>  ?=(%b -.suc-j)
-    =/  msg-j=json  (~(gut by p.inner) 'msg' s+'')
-    :*  %remote-op-result
-        (cord-to-ship p.host-j)
-        p.tag-j
-        p.suc-j
-        ?:(?=(%s -.msg-j) p.msg-j '')
-    ==
-  ::
-  !!
+  ?~  r  ~
+  =/  a=(unit @ud)  -.u.r
+  =/  b=(unit @ud)  +.u.r
+  ?:  =(0 size)  ~
+  ?~  a
+    ::  suffix range: last b bytes
+    ?~  b  ~
+    =/  n  (min u.b size)
+    `[(sub size n) n]
+  ?:  (gte u.a size)  ~
+  =/  last  ?~(b (dec size) (min u.b (dec size)))
+  ?:  (lth last u.a)  ~
+  `[u.a +((sub last u.a))]
 ::
-::  +ipc-command-to-json-cord: serialize IPC command as JSON cord
+++  num
+  |=  t=@t
+  ^-  (unit @ud)
+  (rush t dem)
 ::
-++  ipc-command-to-json-cord
-  |=  [id=@ud cmd=ipc-command:sovnas]
-  ^-  @t
-  =/  cmd-name=@t
-    ?-  -.cmd
-      %ls            'ls'
-      %put           'put'
-      %get           'get'
-      %rm            'rm'
-      %mv            'mv'
-      %mk            'mk'
-      %stat          'stat'
-      %config-read   'config-read'
-      %config-write  'config-write'
-    ==
-  =/  args=json
-    ?-  -.cmd
-      %ls    (frond:enjs 'dir' s+dir.cmd)
-      %put
-        %-  pairs:enjs
-        :~  ['name' s+name.cmd]
-            ['dir' s+dir.cmd]
-            ['data' s+data.cmd]
-        ==
-      %get   (frond:enjs 'path' s+path.cmd)
-      %rm    (frond:enjs 'path' s+path.cmd)
-      %mv
-        %-  pairs:enjs
-        :~  ['src' s+src.cmd]
-            ['dst' s+dst.cmd]
-        ==
-      %mk    (frond:enjs 'dir' s+dir.cmd)
-      %stat  (frond:enjs 'path' s+path.cmd)
-      %config-read   o+~
-      %config-write  (frond:enjs 'config' s+cfg-json.cmd)
-    ==
-  %-  en:json:html
-  %-  pairs:enjs
-  :~  ['id' n+(num-to-cord id)]
-      ['cmd' s+cmd-name]
-      ['args' args]
+++  parse-ship
+  |=  t=@t
+  ^-  (unit ship)
+  ?:  =('' t)  ~
+  =/  s  (trip t)
+  (slaw %p (crip ?:(=('~' -.s) s ['~' s])))
+::
+++  parse-vol
+  |=  t=@t
+  ^-  (unit vol)
+  ?:  =('ship' t)  `%ship
+  ?:  =('host' t)  `%host
+  ~
+::
+::  json
+::
+++  unix-ms
+  |=  d=@da
+  ^-  json
+  ?:  (lth d ~1970.1.1)  n+'0'
+  (numb:enjs:format (div (mul (sub d ~1970.1.1) 1.000) ~s1))
+::
+++  from-unix
+  |=  s=@ud
+  ^-  @da
+  (add ~1970.1.1 (mul s ~s1))
+::
+++  entry-json
+  |=  e=entry
+  ^-  json
+  %-  pairs:enjs:format
+  :~  name+s+name.e
+      dir+b+dir.e
+      size+(numb:enjs:format size.e)
+      mod+(unix-ms mod.e)
+      mime+s+mime.e
   ==
 ::
-::  +ipc-response-from-json: parse daemon JSON response
+++  loc-json
+  |=  l=loc
+  ^-  (list [@t json])
+  :~  vol+s+vol.l
+      path+s+(pax-to-cord pax.l)
+  ==
 ::
-++  ipc-response-from-json
+++  offer-json
+  |=  [host=ship o=offer]
+  ^-  json
+  %-  pairs:enjs:format
+  %+  weld  (loc-json loc.o)
+  ^-  (list [@t json])
+  :~  host+s+(scot %p host)
+      role+s+role.o
+      dir+b+dir.o
+      name+s+name.o
+  ==
+::
+++  share-json
+  |=  [l=loc s=share]
+  ^-  json
+  %-  pairs:enjs:format
+  %+  weld  (loc-json l)
+  ^-  (list [@t json])
+  :~  dir+b+dir.s
+      :-  'who'
+      :-  %a
+      %+  turn  ~(tap by who.s)
+      |=  [w=ship r=role]
+      (pairs:enjs:format ~[ship+s+(scot %p w) role+s+r])
+    ::
+      link+?~(link.s ~ s+u.link.s)
+  ==
+::
+++  role-json
+  |=  r=$@(%owner role)
+  ^-  json
+  s+r
+::
+++  ok-json
+  |=  [ok=? msg=@t]
+  ^-  json
+  (pairs:enjs:format ~[ok+b+ok msg+s+msg])
+::
+::  http
+::
+++  json-octs
   |=  j=json
-  ^-  [id=@ud =ipc-response:sovnas]
-  ?>  ?=(%o -.j)
-  =/  m=(map @t json)  p.j
-  ::
-  =/  id-j=json  (~(got by m) 'id')
-  ?>  ?=(%n -.id-j)
-  =/  id=@ud  (parse-json-num p.id-j)
-  ::
-  =/  status-j=json  (~(got by m) 'status')
-  ?>  ?=(%s -.status-j)
-  ::
-  ?:  .=('error' p.status-j)
-    =/  err-j=json  (~(gut by m) 'error' s+'unknown error')
-    ?:  ?=(%s -.err-j)
-      [id %err 'op' p.err-j]
-    [id %err 'op' 'unknown error']
-  ::
-  ::  status is 'ok'
-  =/  data-j=json  (~(gut by m) 'data' o+~)
-  ?.  ?=(%o -.data-j)
-    [id %ok 'op' 'ok']
-  =/  dm=(map @t json)  p.data-j
-  ::
-  ?:  (~(has by dm) 'entries')
-    =/  dir-j=json  (~(gut by dm) 'dir' s+'/')
-    =/  dir-cord=@t  ?:(?=(%s -.dir-j) p.dir-j '/')
-    =/  entries-j=json  (~(got by dm) 'entries')
-    ?.  ?=(%a -.entries-j)
-      [id %ls-result dir-cord ~]
-    =/  entries=(list ipc-file-info:sovnas)
-      %+  turn  p.entries-j
-      |=  e=json
-      ^-  ipc-file-info:sovnas
-      ?.  ?=(%o -.e)  ['?' 0 0 %.n]
-      =/  em=(map @t json)  p.e
-      =/  nm-j=json   (~(gut by em) 'name' s+'?')
-      =/  sz-j=json   (~(gut by em) 'size' n+'0')
-      =/  mod-j=json  (~(gut by em) 'modified' n+'0')
-      =/  dir-j=json  (~(gut by em) 'is_dir' b+%.n)
-      :^  ?:(?=(%s -.nm-j) p.nm-j '?')
-          ?:(?=(%n -.sz-j) (parse-json-num p.sz-j) 0)
-          ?:(?=(%n -.mod-j) (parse-json-num p.mod-j) 0)
-          ?:(?=(%b -.dir-j) p.dir-j %.n)
-    [id %ls-result dir-cord entries]
-  ::
-  ?:  (~(has by dm) 'ship')
-    ::  config-read or config-write response — re-serialize to JSON cord
-    [id %config-data (en:json:html data-j)]
-  ::
-  ?:  (~(has by dm) 'data')
-    =/  path-j=json  (~(gut by dm) 'path' s+'/')
-    =/  path-cord=@t  ?:(?=(%s -.path-j) p.path-j '/')
-    =/  data-b64-j=json  (~(got by dm) 'data')
-    ?.  ?=(%s -.data-b64-j)
-      [id %err 'get' 'bad data in response']
-    =/  mime-j=json  (~(gut by dm) 'mime' s+'application/octet-stream')
-    =/  size-j=json  (~(gut by dm) 'size' n+'0')
-    =/  mime-cord=@t
-      ?:(?=(%s -.mime-j) p.mime-j 'application/octet-stream')
-    =/  size-val=@ud
-      ?:(?=(%n -.size-j) (parse-json-num p.size-j) 0)
-    [id %get-result path-cord p.data-b64-j mime-cord size-val]
-  ::
-  [id %ok 'op' 'ok']
+  ^-  octs
+  (as-octs:mimes:html (en:json:html j))
 --

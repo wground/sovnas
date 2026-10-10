@@ -5,3 +5,10 @@ ui/dist/
 sovnas.config.json
 sovnas-topdys.config.json
 sovnas-donsur-wansyn.config.json
+__pycache__/
+*.pyc
+dev/ships/
+dev/urbit
+dev/testfiles/
+dev/hostdisk/
+dev/old-desk/
